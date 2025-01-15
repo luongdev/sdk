@@ -5,3 +5,7 @@ export interface ConnectionDelegate {
   onConnect?: ConnectListener;
   onDisconnect?: DisconnectListener;
 }
+
+export type ConnectOptions = {
+  delegate?: ConnectionDelegate;
+};

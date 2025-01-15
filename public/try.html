@@ -1,0 +1,46 @@
+<!doctype html>
+<html>
+<head>
+    <title>Voice SDK Sample</title>
+</head>
+<body>
+<div id="app"></div>
+<script>
+    (function (d, n) {
+        let js, lk, head = d.getElementsByTagName('head')[0];
+        if (!d.getElementById(`${n}-js`)) {
+            js = d.createElement('script');
+            js.id = `${n}-js`;
+            js.src = './js/voice-sdk.umd.cjs';
+            head.appendChild(js);
+        }
+
+        if (!d.getElementById(`${n}-css`)) {
+            lk = d.createElement('link');
+            lk.id = `${n}-css`;
+            lk.rel = 'stylesheet';
+            lk.href = './css/voice-sdk.css';
+            head.appendChild(lk);
+        }
+    }(document, 'voice-sdk'));
+
+    window.onload =  function () {
+        window.VoiceSDK.init({
+            el: 'app',
+            appId: 'your-app-id',
+            appName: 'your-app-name',
+            secretKey: 'your-secret-key',
+        }, i => {
+            i.connect({
+                delegate: {
+                    onStatus: (status, reason) => {
+                        console.log('onStatus', status, !!reason);
+                    }
+                }
+            })
+        });
+    }
+</script>
+</body>
+
+</html>

@@ -17,7 +17,8 @@ export default defineConfig({
     lib: {
       entry: 'src/api/voice-sdk.ts',
       name: 'VoiceSDK',
-      fileName: 'voice-sdk',
+      fileName: 'js/voice-sdk',
+      cssFileName: 'css/voice-sdk',
       formats: ['es', 'umd'],
     },
     rollupOptions: {
