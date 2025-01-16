@@ -31,22 +31,6 @@ class Dialog {
 
     return this.remoteMedia;
   }
-
-  toggleMute() {
-    if (this.session.isMuted()) {
-      this.session.unmute();
-    } else {
-      this.session.mute();
-    }
-  }
-
-  toggleHold() {
-    if (this.session.isOnHold()) {
-      this.session.unhold();
-    } else {
-      this.session.hold();
-    }
-  }
 }
 
 export default class VoiceSDK {
@@ -126,7 +110,7 @@ export default class VoiceSDK {
     return this.isConnected;
   }
 
-  public async login(user: User) {
+  public async login(user: User): Promise<boolean> {
     const connected = await this._connect(user);
     if (!connected) throw new Error('Failed to connect to gateway(s)');
 
@@ -225,6 +209,29 @@ export default class VoiceSDK {
       id: globalCallId,
       hangup: (cause?: string) => s.terminate({ cause }),
     };
+  }
+
+  public transfer(dest: string): Promise<boolean> {
+    if (!this._dialog?.session) return Promise.reject('No active call');
+
+    return new Promise((resolve, reject) => {
+      this._dialog?.session.refer(new URI('sip', dest, this._config.appName), {
+        eventHandlers: {
+          requestSucceeded: () => {
+            resolve(true);
+          },
+          requestFailed: (cause: any) => {
+            reject(new Error(`Failed to transfer call: ${cause}`));
+          },
+        },
+      });
+    });
+  }
+
+  public hangup(cause?: string) {
+    if (!this._dialog?.session) return;
+
+    this._dialog.session.terminate({ cause });
   }
 
   public mute() {
