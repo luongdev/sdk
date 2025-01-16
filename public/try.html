@@ -24,20 +24,31 @@
         }
     }(document, 'voice-sdk'));
 
-    window.onload =  function () {
+    window.onload = function () {
         window.VoiceSDK.init({
             el: 'app',
             appId: 'your-app-id',
-            appName: 'your-app-name',
+            appName: 'pjico.metechvn.com',
             secretKey: 'your-secret-key',
-        }, i => {
-            i.connect({
-                delegate: {
-                    onStatus: (status, reason) => {
-                        console.log('onStatus', status, !!reason);
-                    }
+        }, async i => {
+            console.log(await i.connect({
+                    extension: '100000',
+                    password: 'MmE1NDUzZTU5OTM2NTZjYjk=',
+                    gateways: ['ws://101.99.20.58:7080'],
+                },
+                {
+                    delegate: {
+                        onConnect: () => {
+                            console.log('Connected');
+                        },
+                        onDisconnect: () => {
+                            console.log('Disconnected');
+                        }
+                    },
                 }
-            })
+            ));
+
+            i.disconnect();
         });
     }
 </script>

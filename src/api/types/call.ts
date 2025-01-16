@@ -3,3 +3,5 @@ export type CallListener = (caller: string, callee: string, params?: Record<stri
 export interface CallDelegate {
   onCall?: CallListener;
 }
+
+export type CallOptions = {};
