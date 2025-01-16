@@ -143,7 +143,7 @@ export default class VoiceSDK {
     this._ua.stop();
   }
 
-  public async makeCall(dest: string, opts?: CallOptions): Promise<string> {
+  public async makeCall(dest: string, opts?: CallOptions): Promise<{ id: string; hangup: (cause?: string) => void }> {
     if (!this._ua || !this.isConnected || !this.isRegistered) {
       throw new Error('SDK not ready for make call');
     }
@@ -203,9 +203,12 @@ export default class VoiceSDK {
       });
     });
 
-    this._ua.call(targetUri.toString(), { ...callOpts });
+    const s = this._ua.call(targetUri.toString(), { ...callOpts });
 
-    return globalCallId;
+    return {
+      id: globalCallId,
+      hangup: (cause?: string) => s.terminate({ cause }),
+    };
   }
 
   private async _setup(user: User): Promise<UA> {

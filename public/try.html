@@ -1,0 +1,87 @@
+<!doctype html>
+<html>
+<head>
+    <title>Voice SDK Sample</title>
+</head>
+<body>
+<div id="app"></div>
+<script>
+    (function (d, n) {
+        let js, lk, head = d.getElementsByTagName('head')[0];
+        if (!d.getElementById(`${n}-js`)) {
+            js = d.createElement('script');
+            js.id = `${n}-js`;
+            js.src = './js/voice-sdk.umd.cjs';
+            head.appendChild(js);
+        }
+
+        if (!d.getElementById(`${n}-css`)) {
+            lk = d.createElement('link');
+            lk.id = `${n}-css`;
+            lk.rel = 'stylesheet';
+            lk.href = './css/voice-sdk.css';
+            head.appendChild(lk);
+        }
+    }(document, 'voice-sdk'));
+
+    window.onload = function () {
+        window.VoiceSDK.init({
+            el: 'app',
+            appId: 'your-app-id',
+            appName: 'pjico.metechvn.com',
+            secretKey: 'your-secret-key',
+            delegate: {
+                onConnect: () => {
+                    console.log('Connected');
+                },
+                onDisconnect: () => {
+                    console.log('Disconnected');
+                },
+                callCreated: (caller, callee, params) => {
+                    console.log('Call created', caller, callee, params);
+                },
+                callConnected: () => {
+                    console.log('Call connected');
+                },
+                callTerminated: () => {
+                    console.log('Call disconnected');
+                },
+            },
+        }, async i => {
+            console.log(await i.login({
+            }))
+
+
+            let status = '';
+            const { id, hangup } = await i.makeCall('0868959815', {
+                did: '0945404928',
+                delegate: {
+                    callCreated: (caller, callee, params) => {
+                        console.log('Call created override', caller, callee, params);
+                        status = 'created';
+                    },
+                    callConnected: () => {
+                        console.log('Call connected override');
+                        status = 'connected';
+                    },
+                    callTerminated: () => {
+                        console.log('Call disconnected override');
+                        status = 'terminated';
+                    },
+                }
+            });
+            console.log(`Day la callId: `, id);
+
+            setTimeout(() => {
+                if (status !== 'connected') {
+                    hangup();
+                } else {
+                    i.disconnect();
+                }
+            }, 10000);
+        });
+    }
+</script>
+</body>
+
+</html>
