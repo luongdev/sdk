@@ -30,25 +30,27 @@
             appId: 'your-app-id',
             appName: 'pjico.metechvn.com',
             secretKey: 'your-secret-key',
-        }, async i => {
-            console.log(await i.connect({
-                    extension: '100000',
-                    password: 'MmE1NDUzZTU5OTM2NTZjYjk=',
-                    gateways: ['ws://101.99.20.58:7080'],
+            gateways: ['ws://101.99.20.58:7080'],
+            delegate: {
+                onConnect: () => {
+                    console.log('Connected');
                 },
-                {
-                    delegate: {
-                        onConnect: () => {
-                            console.log('Connected');
-                        },
-                        onDisconnect: () => {
-                            console.log('Disconnected');
-                        }
-                    },
+                onDisconnect: () => {
+                    console.log('Disconnected');
                 }
-            ));
+            },
+        }, async i => {
+            console.log(await i.login({
+                extension: '100000',
+                password: 'MmE1NDUzZTU5OTM2NTZjYjk=',
+            }))
 
-            i.disconnect();
+            const callId = await i.makeCall('0828865304', {
+
+            });
+            console.log(`Day la callId: `, callId);
+
+            // i.disconnect();
         });
     }
 </script>
