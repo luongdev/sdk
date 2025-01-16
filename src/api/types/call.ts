@@ -1,13 +1,13 @@
 import type { RTCSessionEventMap } from 'jssip/lib/RTCSession';
 
 export type CallCreatedListener = (caller: string, callee: string, params?: Record<string, unknown>) => void;
-export type CallConnectedListener = (caller: string, callee: string, params?: Record<string, unknown>) => void;
-export type CallTerminatedListener = (caller: string, callee: string, params?: Record<string, unknown>) => void;
+export type CallConnectedListener = () => void;
+export type CallTerminatedListener = () => void;
 
 export interface CallDelegate {
-  onCreated?: CallCreatedListener;
-  onConnected?: CallConnectedListener;
-  onTerminated?: CallTerminatedListener;
+  callCreated?: CallCreatedListener;
+  callConnected?: CallConnectedListener;
+  callTerminated?: CallTerminatedListener;
 
   rtc?: RTCSessionEventMap;
 }
