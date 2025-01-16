@@ -31,6 +31,22 @@ class Dialog {
 
     return this.remoteMedia;
   }
+
+  toggleMute() {
+    if (this.session.isMuted()) {
+      this.session.unmute();
+    } else {
+      this.session.mute();
+    }
+  }
+
+  toggleHold() {
+    if (this.session.isOnHold()) {
+      this.session.unhold();
+    } else {
+      this.session.hold();
+    }
+  }
 }
 
 export default class VoiceSDK {
@@ -209,6 +225,42 @@ export default class VoiceSDK {
       id: globalCallId,
       hangup: (cause?: string) => s.terminate({ cause }),
     };
+  }
+
+  public mute() {
+    if (!this._dialog?.session) return;
+
+    const { audio } = this._dialog.session.isMuted();
+    if (!audio) {
+      return this._dialog?.session.mute();
+    }
+  }
+
+  public unmute() {
+    if (!this._dialog?.session) return;
+
+    const { audio } = this._dialog.session.isMuted();
+    if (audio) {
+      return this._dialog?.session.unmute();
+    }
+  }
+
+  public hold() {
+    if (!this._dialog?.session) return;
+
+    const { local } = this._dialog.session.isOnHold();
+    if (!local) {
+      return this._dialog?.session.hold();
+    }
+  }
+
+  public unhold() {
+    if (!this._dialog?.session) return;
+
+    const { local } = this._dialog.session.isOnHold();
+    if (local) {
+      return this._dialog?.session.unhold();
+    }
   }
 
   private async _setup(user: User): Promise<UA> {

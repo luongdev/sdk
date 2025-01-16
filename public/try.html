@@ -5,6 +5,11 @@
 </head>
 <body>
 <div id="app"></div>
+
+<button id="mute">Mute</button>
+<button id="unmute">Un-Mute</button>
+<button id="hold">Hold</button>
+<button id="unhold">Un-Hold</button>
 <script>
     (function (d, n) {
         let js, lk, head = d.getElementsByTagName('head')[0];
@@ -25,6 +30,11 @@
     }(document, 'voice-sdk'));
 
     window.onload = function () {
+        const muteBtn = document.getElementById('mute');
+        const unmuteBtn = document.getElementById('unmute');
+        const holdBtn = document.getElementById('hold');
+        const unholdBtn = document.getElementById('unhold');
+
         window.VoiceSDK.init({
             el: 'app',
             appId: 'your-app-id',
@@ -49,6 +59,7 @@
             },
         }, async i => {
             console.log(await i.login({
+
             }))
 
 
@@ -63,22 +74,42 @@
                     callConnected: () => {
                         console.log('Call connected override');
                         status = 'connected';
+
+                        muteBtn.onclick = () => i.mute();
+                        unmuteBtn.onclick = () => i.unmute();
+                        holdBtn.onclick = () => i.hold();
+                        unholdBtn.onclick = () => i.unhold();
+
                     },
                     callTerminated: () => {
                         console.log('Call disconnected override');
                         status = 'terminated';
                     },
+                    rtc: {
+                        muted: () => {
+                            console.log('Muted');
+                        },
+                        unmuted: () => {
+                            console.log('Unmuted');
+                        },
+                        hold: () => {
+                            console.log('Hold');
+                        },
+                        unhold: () => {
+                            console.log('Unhold');
+                        }
+                    }
                 }
             });
             console.log(`Day la callId: `, id);
 
-            setTimeout(() => {
-                if (status !== 'connected') {
-                    hangup();
-                } else {
-                    i.disconnect();
-                }
-            }, 10000);
+            // setTimeout(() => {
+            //     if (status !== 'connected') {
+            //         hangup();
+            //     } else {
+            //         i.disconnect();
+            //     }
+            // }, 10000);
         });
     }
 </script>
