@@ -2,8 +2,14 @@ import type { Config, User } from '@api/types/types.ts';
 import type { ConnectOptions } from '@api/types/connections.ts';
 import { UA, URI, Utils, WebSocketInterface } from 'jssip';
 import type { CallOptions } from '@api/types/call.ts';
-import type { IncomingRTCSessionEvent, OutgoingRTCSessionEvent } from 'jssip/lib/UA';
-import type { RTCSession } from 'jssip/lib/RTCSession';
+import type {
+  EndEvent,
+  IncomingAckEvent,
+  IncomingEvent,
+  OutgoingAckEvent,
+  OutgoingEvent,
+  RTCSession,
+} from 'jssip/lib/RTCSession';
 
 export default class VoiceSDK {
   private static _instance: VoiceSDK;
@@ -15,8 +21,10 @@ export default class VoiceSDK {
 
   private readonly _timeout = 10000;
 
+  private _session?: RTCSession;
   private _localMedia?: MediaStream;
-  // private _remoteMedia?: MediaStream;
+  private readonly _remoteMedia: MediaStream;
+  private readonly _audio: HTMLAudioElement;
 
   get isConnected(): boolean {
     return !!this._ua?.isConnected();
@@ -39,6 +47,10 @@ export default class VoiceSDK {
     if (!this._uaGateways.length) {
       throw new Error('Missing required gateways');
     }
+
+    this._remoteMedia = new MediaStream();
+    this._audio = new Audio();
+    this._audio.srcObject = this._remoteMedia;
   }
 
   public static async init(cfg: Config, cb?: (instance: VoiceSDK) => void) {
@@ -117,6 +129,8 @@ export default class VoiceSDK {
     const targetUri = new URI('sip', dest, this._config.appName);
 
     const extraHeaders: string[] = [];
+    if (opts.did?.length) extraHeaders.push(`X-Dialed-Number: ${opts.did}`);
+
     if (extraVariables) {
       Object.entries(extraVariables).forEach(([key, value]) => {
         if (!key?.length || !value?.length) return;
@@ -191,9 +205,17 @@ export default class VoiceSDK {
 
         Promise.resolve()
           .then(() => {
-            ua.on('newRTCSession', e => {
+            ua.on('newRTCSession', (e: any) => {
               const { session, originator } = e || {};
               if (!session || !originator?.length) return;
+
+              this._session = session;
+
+              session.on('accepted', this.onSessionAccepted.bind(this));
+              session.on('confirmed', this.onSessionConfirmed.bind(this));
+              session.on('failed', this.onSessionEnded.bind(this));
+              session.on('ended', this.onSessionEnded.bind(this));
+              session.on('progress', this.onSessionProgress.bind(this));
 
               if ('remote' === originator) {
                 this._incomingCall(session);
@@ -244,6 +266,54 @@ export default class VoiceSDK {
 
   private async _outgoingCall(session: RTCSession) {
     console.log('Outgoing call', session);
+  }
+
+  private async onSessionAccepted(event: IncomingEvent | OutgoingEvent) {
+    // call.status = CallStatus.S_ANSWERED;
+    // call.answerTime = Date.now();
+    // const { remote } = await audio.start();
+
+    console.debug('UA[onSessionAccepted]: ', event);
+
+    this._session?.connection?.getReceivers()?.forEach(receiver => {
+      if (receiver.track) this._remoteMedia?.addTrack(receiver.track);
+    });
+
+    this._audio.play().catch(console.error);
+  }
+
+  private async onSessionProgress(event: IncomingEvent | OutgoingEvent) {
+    console.debug('UA[onSessionProgress]: ', event);
+    // const call = useCallStore();
+    // call.status = CallStatus.S_RINGING;
+  }
+
+  private async onSessionConfirmed(event: IncomingAckEvent | OutgoingAckEvent) {
+    console.debug('UA[onSessionConfirmed]: ', event);
+    // const call = useCallStore();
+
+    // if (CallStatus.S_ANSWERED !== call.status) {
+    //   call.status = CallStatus.S_ANSWERED;
+    //   call.answerTime = Date.now();
+    // }
+  }
+
+  private async onSessionEnded(event: EndEvent) {
+    console.debug(`UA[onSessionEnded] ${event.cause}: `, event);
+    // const call = useCallStore();
+    //
+    // if ('Terminated' !== event.cause) {
+    //   call.error = event.cause;
+    //   call.status = CallStatus.S_ERROR;
+    // } else {
+    //   call.status = CallStatus.S_TERMINATED;
+    // }
+
+    this._closeRemoteTracks();
+  }
+
+  private _closeRemoteTracks() {
+    this._remoteMedia?.getTracks()?.forEach(track => track.stop());
   }
 }
 
