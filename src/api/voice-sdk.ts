@@ -15,11 +15,21 @@ class Dialog {
   status: 'CREATED' | 'CONNECTED' | 'TERMINATED';
   delegate?: CallDelegate;
   session: RTCSession;
+  remoteMedia: MediaStream;
 
   constructor(session: RTCSession, delegate?: CallDelegate) {
     this.session = session;
     this.delegate = delegate;
     this.status = 'CREATED';
+    this.remoteMedia = new MediaStream();
+  }
+
+  remoteStream(): MediaStream {
+    this.session?.connection?.getReceivers()?.forEach(receiver => {
+      if (receiver.track) this.remoteMedia.addTrack(receiver.track);
+    });
+
+    return this.remoteMedia;
   }
 }
 
@@ -35,7 +45,6 @@ export default class VoiceSDK {
 
   private _dialog?: Dialog;
   private _localMedia?: MediaStream;
-  private readonly _remoteMedia: MediaStream;
   private readonly _audio: HTMLAudioElement;
 
   get isConnected(): boolean {
@@ -60,9 +69,7 @@ export default class VoiceSDK {
       throw new Error('Missing required gateways');
     }
 
-    this._remoteMedia = new MediaStream();
     this._audio = new Audio();
-    this._audio.srcObject = this._remoteMedia;
   }
 
   public static async init(cfg: Config, cb?: (instance: VoiceSDK) => void) {
@@ -127,6 +134,10 @@ export default class VoiceSDK {
 
   public disconnect() {
     if (!this._ua || !this.isConnected) return;
+
+    if (this._dialog?.session) {
+      this._dialog.session.terminate();
+    }
 
     this._ua.unregister();
     this._ua.stop();
@@ -234,7 +245,7 @@ export default class VoiceSDK {
               const { session, originator } = e || {};
               if (!session || !originator?.length) return;
 
-              if (!this._dialog) this._dialog = session;
+              if (!this._dialog) this._dialog = new Dialog(session, this._config.delegate);
 
               session.on('accepted', this.onSessionAccepted.bind(this));
               session.on('confirmed', this.onSessionConfirmed.bind(this));
@@ -242,11 +253,11 @@ export default class VoiceSDK {
               session.on('ended', this.onSessionEnded.bind(this));
               session.on('progress', this.onSessionProgress.bind(this));
 
-              if ('remote' === originator) {
-                this._incomingCall();
-              } else {
-                this._outgoingCall();
-              }
+              // if ('remote' === originator) {
+              //   this._incomingCall();
+              // } else {
+              //   this._outgoingCall();
+              // }
             });
           })
           .catch(console.error);
@@ -264,20 +275,17 @@ export default class VoiceSDK {
     });
   }
 
-  private async _incomingCall() {
-    console.log('Incoming call');
-  }
+  // private async _incomingCall() {
+  //   console.log('Incoming call');
+  // }
+  //
+  // private async _outgoingCall() {
+  //   console.log('Outgoing call');
+  // }
 
-  private async _outgoingCall() {
-    console.log('Outgoing call');
-  }
-
-  private async onSessionAccepted(event: IncomingEvent | OutgoingEvent) {
-    // call.status = CallStatus.S_ANSWERED;
-    // call.answerTime = Date.now();
-    // const { remote } = await audio.start();
-
-    console.debug('UA[onSessionAccepted]: ', event);
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
+  private async onSessionAccepted(_event: IncomingEvent | OutgoingEvent) {
+    // console.debug('UA[onSessionAccepted]: ', event);
 
     if (!this._dialog) return;
 
@@ -286,22 +294,17 @@ export default class VoiceSDK {
       Promise.resolve().then(() => this._dialog?.delegate?.callConnected?.());
     }
 
-    this._dialog?.session.connection?.getReceivers()?.forEach(receiver => {
-      if (receiver.track) this._remoteMedia?.addTrack(receiver.track);
-    });
-
+    this._audio.srcObject = this._dialog.remoteStream();
     this._audio.play().catch(console.error);
   }
 
-  private async onSessionProgress(event: IncomingEvent | OutgoingEvent) {
-    console.debug('UA[onSessionProgress]: ', event);
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
+  private async onSessionProgress(_event: IncomingEvent | OutgoingEvent) {
+    // console.debug('UA[onSessionProgress]: ', event);
     // const call = useCallStore();
     // call.status = CallStatus.S_RINGING;
 
     if (!this._dialog) return;
-
-    // this._dialog.status = 'CONNECTED';
-    // this._dialog.delegate?.callRinging?.();
   }
 
   private async onSessionConfirmed(event: IncomingAckEvent | OutgoingAckEvent) {
@@ -321,27 +324,17 @@ export default class VoiceSDK {
     }
   }
 
-  private async onSessionEnded(event: EndEvent) {
-    console.debug(`UA[onSessionEnded] ${event.cause}: `, event);
-    // const call = useCallStore();
-    //
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
+  private async onSessionEnded(_event: EndEvent) {
+    // console.debug(`UA[onSessionEnded] ${event.cause}: `, event);
     // if ('Terminated' !== event.cause) {
-    //   call.error = event.cause;
-    //   call.status = CallStatus.S_ERROR;
     // } else {
-    //   call.status = CallStatus.S_TERMINATED;
     // }
 
     if (!this._dialog) return;
 
     this._dialog.status = 'TERMINATED';
     Promise.resolve().then(() => this._dialog?.delegate?.callTerminated?.());
-
-    this._closeRemoteTracks();
-  }
-
-  private _closeRemoteTracks() {
-    this._remoteMedia?.getTracks()?.forEach(track => track.stop());
   }
 }
 
