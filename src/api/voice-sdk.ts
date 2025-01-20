@@ -1,4 +1,4 @@
-import type { Config, User } from '@api/types/types.ts';
+import type { Config, User, SdkResult } from '@api/types/types.ts';
 import type { ConnectOptions } from '@api/types/connections.ts';
 import { UA, URI, Utils, WebSocketInterface } from 'jssip';
 import type { CallDelegate, CallOptions } from '@api/types/call.ts';
@@ -110,22 +110,30 @@ export default class VoiceSDK {
     return this.isConnected;
   }
 
-  public async login(user: User): Promise<boolean> {
+  public async login(user: User): Promise<SdkResult> {
     const connected = await this._connect(user);
-    if (!connected) throw new Error('Failed to connect to gateway(s)');
+    if (!connected) {
+      return {
+        success: false,
+        error: `Failed to connect to gateway(s): ${this._uaGateways.join(', ')}`,
+      };
+    }
 
-    return new Promise<boolean>((resolve, reject) => {
+    return new Promise<SdkResult>(resolve => {
       const timeout = setTimeout(() => {
-        reject(new Error('Register timeout'));
+        resolve({ success: false, error: `Registration timeout after ${this._timeout}ms` });
       }, this._timeout);
 
       this._ua?.on('registered', () => {
         clearTimeout(timeout);
-        resolve(true);
+        resolve({ success: true });
       });
 
-      this._ua?.on('registrationFailed', () => {
-        reject(new Error('Register failed'));
+      this._ua?.on('registrationFailed', e => {
+        resolve({
+          success: false,
+          error: `Registration failed: ${e.cause}`,
+        });
       });
 
       this._ua?.register();
@@ -143,9 +151,12 @@ export default class VoiceSDK {
     this._ua.stop();
   }
 
-  public async makeCall(dest: string, opts?: CallOptions): Promise<{ id: string; hangup: (cause?: string) => void }> {
+  // { id: string; hangup: (cause?: string) => void }
+  public async makeCall(dest: string, opts?: CallOptions): Promise<SdkResult> {
+    const result = { success: false } as SdkResult;
     if (!this._ua || !this.isConnected || !this.isRegistered) {
-      throw new Error('SDK not ready for make call');
+      result.error = 'SDK not ready for make call';
+      return result;
     }
 
     const targetUri = new URI('sip', dest, this._config.appName);
@@ -205,23 +216,25 @@ export default class VoiceSDK {
 
     const s = this._ua.call(targetUri.toString(), { ...callOpts });
 
-    return {
-      id: globalCallId,
-      hangup: (cause?: string) => s.terminate({ cause }),
-    };
+    result.success = true;
+    result.data = { id: globalCallId, hangup: (cause?: string) => s.terminate({ cause }) };
+
+    return result;
   }
 
-  public transfer(dest: string): Promise<boolean> {
-    if (!this._dialog?.session) return Promise.reject('No active call');
+  public transfer(dest: string): Promise<SdkResult> {
+    if (!this._dialog?.session) {
+      return Promise.resolve({ success: false, error: 'No active call to transfer' });
+    }
 
-    return new Promise((resolve, reject) => {
+    return new Promise(resolve => {
       this._dialog?.session.refer(new URI('sip', dest, this._config.appName), {
         eventHandlers: {
           requestSucceeded: () => {
-            resolve(true);
+            resolve({ success: true });
           },
           requestFailed: (cause: any) => {
-            reject(new Error(`Failed to transfer call: ${cause}`));
+            resolve({ success: false, error: `Failed to transfer call: ${cause}` });
           },
         },
       });
@@ -289,6 +302,20 @@ export default class VoiceSDK {
       const onConnect = this._config.delegate?.onConnect;
       const onDisconnect = this._config.delegate?.onDisconnect;
 
+      // eslint-disable-next-line
+      // @ts-expect-error
+      ua.on('newTransaction', ({ transaction }) => {
+        const request = transaction.request || { method: '', cseq: 0 };
+        const { method, cseq } = request;
+        if (!method?.length || !cseq) return;
+
+        console.log(`UA[newTransaction]: ${method} ${cseq}`, transaction);
+
+        if (method === 'REGISTER' && cseq === 1) {
+          (request as any)?.setHeader('call-id', Utils.newUUID());
+        }
+      });
+
       ua.on('connecting', () => {
         timeout = setTimeout(() => {
           reject(new Error('Connection timeout'));
@@ -304,22 +331,22 @@ export default class VoiceSDK {
         Promise.resolve()
           .then(() => {
             ua.on('newRTCSession', (e: any) => {
+              // // eslint-disable-next-line no-debugger
+              // debugger;
               const { session, originator } = e || {};
               if (!session || !originator?.length) return;
 
-              if (!this._dialog) this._dialog = new Dialog(session, this._config.delegate);
+              // if (!this._dialog) this._dialog = new Dialog(session, this._config.delegate);
+              // this._dialog.delegate?.callCreated?.(request?.from?.uri?.user, request?.to?.uri?.user, {
+              //   id: globalCallId,
+              //   direction: isOutbound ? 'outbound' : 'inbound',
+              // });
 
               session.on('accepted', this.onSessionAccepted.bind(this));
               session.on('confirmed', this.onSessionConfirmed.bind(this));
               session.on('failed', this.onSessionEnded.bind(this));
               session.on('ended', this.onSessionEnded.bind(this));
               session.on('progress', this.onSessionProgress.bind(this));
-
-              // if ('remote' === originator) {
-              //   this._incomingCall();
-              // } else {
-              //   this._outgoingCall();
-              // }
             });
           })
           .catch(console.error);
@@ -336,14 +363,6 @@ export default class VoiceSDK {
       ua.start();
     });
   }
-
-  // private async _incomingCall() {
-  //   console.log('Incoming call');
-  // }
-  //
-  // private async _outgoingCall() {
-  //   console.log('Outgoing call');
-  // }
 
   // eslint-disable-next-line @typescript-eslint/no-unused-vars
   private async onSessionAccepted(_event: IncomingEvent | OutgoingEvent) {
@@ -362,8 +381,6 @@ export default class VoiceSDK {
 
   // eslint-disable-next-line @typescript-eslint/no-unused-vars
   private async onSessionProgress(_event: IncomingEvent | OutgoingEvent) {
-    // console.debug('UA[onSessionProgress]: ', event);
-    // const call = useCallStore();
     // call.status = CallStatus.S_RINGING;
 
     if (!this._dialog) return;
@@ -371,12 +388,7 @@ export default class VoiceSDK {
 
   private async onSessionConfirmed(event: IncomingAckEvent | OutgoingAckEvent) {
     console.debug('UA[onSessionConfirmed]: ', event);
-    // const call = useCallStore();
-
-    // if (CallStatus.S_ANSWERED !== call.status) {
     //   call.status = CallStatus.S_ANSWERED;
-    //   call.answerTime = Date.now();
-    // }
 
     if (!this._dialog) return;
 
@@ -388,11 +400,6 @@ export default class VoiceSDK {
 
   // eslint-disable-next-line @typescript-eslint/no-unused-vars
   private async onSessionEnded(_event: EndEvent) {
-    // console.debug(`UA[onSessionEnded] ${event.cause}: `, event);
-    // if ('Terminated' !== event.cause) {
-    // } else {
-    // }
-
     if (!this._dialog) return;
 
     this._dialog.status = 'TERMINATED';

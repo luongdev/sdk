@@ -38,8 +38,9 @@
         window.VoiceSDK.init({
             el: 'app',
             appId: 'your-app-id',
-            appName: 'pjico.metechvn.com',
+            appName: 'mirae.metechvn.com',
             secretKey: 'your-secret-key',
+            gateways: ['wss://proxy-dev.metechvn.com:7443'],
             delegate: {
                 onConnect: () => {
                     console.log('Connected');
@@ -59,12 +60,13 @@
             },
         }, async i => {
             console.log(await i.login({
-
+                extension: '100099',
+                password: 'abc123',
             }))
 
 
             let status = '';
-            const { id, hangup } = await i.makeCall('0868959815', {
+            const { id, hangup } = await i.makeCall('0868959888', {
                 did: '0945404928',
                 delegate: {
                     callCreated: (caller, callee, params) => {
@@ -103,13 +105,19 @@
             });
             console.log(`Day la callId: `, id);
 
-            // setTimeout(() => {
-            //     if (status !== 'connected') {
-            //         hangup();
-            //     } else {
-            //         i.disconnect();
-            //     }
-            // }, 10000);
+            setTimeout(async () => {
+                const res = await i.transfer('100001');
+
+                console.log(`Day la res: `, res);
+            }, 10000)
+
+            setTimeout(() => {
+                if (status !== 'connected') {
+                    hangup();
+                } else {
+                    i.hangup();
+                }
+            }, 20000);
         });
     }
 </script>

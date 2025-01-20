@@ -4,9 +4,11 @@ import type { StatusDelegate } from '@api/types/status.ts';
 
 export interface Delegate extends CallDelegate, ConnectionDelegate, StatusDelegate {}
 
-export interface ConnectOptions {
-  delegate?: Delegate;
-}
+export type SdkResult = {
+  success: boolean;
+  data?: unknown;
+  error?: string;
+};
 
 export interface Config {
   el: string;
