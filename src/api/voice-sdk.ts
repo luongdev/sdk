@@ -1,6 +1,6 @@
 import type { Config, User, SdkResult } from '@api/types/types.ts';
 import type { ConnectOptions } from '@api/types/connections.ts';
-import { UA, URI, Utils, WebSocketInterface } from 'jssip';
+import { UA, URI, Utils, WebSocketInterface, C } from 'jssip';
 import type { CallDelegate, CallOptions } from '@api/types/call.ts';
 import type {
   EndEvent,
@@ -10,18 +10,25 @@ import type {
   OutgoingEvent,
   RTCSession,
 } from 'jssip/lib/RTCSession';
+import type { IncomingRTCSessionEvent, OutgoingRTCSessionEvent } from 'jssip/lib/UA';
 
 class Dialog {
+  id: string;
   status: 'CREATED' | 'CONNECTED' | 'TERMINATED';
   delegate?: CallDelegate;
   session: RTCSession;
   remoteMedia: MediaStream;
 
   constructor(session: RTCSession, delegate?: CallDelegate) {
+    this.id = '';
     this.session = session;
     this.delegate = delegate;
     this.status = 'CREATED';
     this.remoteMedia = new MediaStream();
+  }
+
+  isTerminated(): boolean {
+    return 'TERMINATED' === this.status?.toUpperCase();
   }
 
   remoteStream(): MediaStream {
@@ -32,6 +39,9 @@ class Dialog {
     return this.remoteMedia;
   }
 }
+
+const DID_HEADER = 'X-DID';
+const DIRECTION_HEADER = 'X-DIR';
 
 export default class VoiceSDK {
   private static _instance: VoiceSDK;
@@ -151,9 +161,19 @@ export default class VoiceSDK {
     this._ua.stop();
   }
 
-  // { id: string; hangup: (cause?: string) => void }
   public async makeCall(dest: string, opts?: CallOptions): Promise<SdkResult> {
     const result = { success: false } as SdkResult;
+
+    if (!dest?.length) {
+      result.error = 'Invalid destination';
+      return result;
+    }
+
+    if (this._dialog && !this._dialog.isTerminated()) {
+      result.error = 'Call already in progress';
+      return result;
+    }
+
     if (!this._ua || !this.isConnected || !this.isRegistered) {
       result.error = 'SDK not ready for make call';
       return result;
@@ -162,7 +182,7 @@ export default class VoiceSDK {
     const targetUri = new URI('sip', dest, this._config.appName);
 
     const extraHeaders: string[] = [];
-    if (opts?.did?.length) extraHeaders.push(`X-Dialed-Number: ${opts.did}`);
+    if (opts?.did?.length) extraHeaders.push(`${DID_HEADER}: ${opts.did}`);
 
     if (opts?.extraVariables) {
       Object.entries(opts.extraVariables).forEach(([key, value]) => {
@@ -203,15 +223,9 @@ export default class VoiceSDK {
       if (isOutbound) {
         (request as any).setHeader('call-id', globalCallId);
       }
+      this._dialog.id = globalCallId;
 
-      if (opts?.delegate?.rtc) {
-        Object.entries(opts.delegate.rtc).forEach(([event, handler]) => session.once(event, handler));
-      }
-
-      this._dialog.delegate?.callCreated?.(request.from?.uri?.user, request.to?.uri?.user, {
-        id: globalCallId,
-        direction: isOutbound ? 'outbound' : 'inbound',
-      });
+      this._onSession(e, opts);
     });
 
     const s = this._ua.call(targetUri.toString(), { ...callOpts });
@@ -309,8 +323,6 @@ export default class VoiceSDK {
         const { method, cseq } = request;
         if (!method?.length || !cseq) return;
 
-        console.log(`UA[newTransaction]: ${method} ${cseq}`, transaction);
-
         if (method === 'REGISTER' && cseq === 1) {
           (request as any)?.setHeader('call-id', Utils.newUUID());
         }
@@ -329,26 +341,27 @@ export default class VoiceSDK {
           .catch(console.error);
 
         Promise.resolve()
-          .then(() => {
-            ua.on('newRTCSession', (e: any) => {
-              // // eslint-disable-next-line no-debugger
-              // debugger;
-              const { session, originator } = e || {};
-              if (!session || !originator?.length) return;
+          .then(() => ua.on('newRTCSession', this._onSession.bind(this)))
 
-              // if (!this._dialog) this._dialog = new Dialog(session, this._config.delegate);
-              // this._dialog.delegate?.callCreated?.(request?.from?.uri?.user, request?.to?.uri?.user, {
-              //   id: globalCallId,
-              //   direction: isOutbound ? 'outbound' : 'inbound',
-              // });
-
-              session.on('accepted', this.onSessionAccepted.bind(this));
-              session.on('confirmed', this.onSessionConfirmed.bind(this));
-              session.on('failed', this.onSessionEnded.bind(this));
-              session.on('ended', this.onSessionEnded.bind(this));
-              session.on('progress', this.onSessionProgress.bind(this));
-            });
-          })
+          // => {
+          //   // // eslint-disable-next-line no-debugger
+          //   // debugger;
+          //   const { session, originator } = e || {};
+          //   if (!session || !originator?.length) return;
+          //
+          //   // if (!this._dialog) this._dialog = new Dialog(session, this._config.delegate);
+          //   // this._dialog.delegate?.callCreated?.(request?.from?.uri?.user, request?.to?.uri?.user, {
+          //   //   id: globalCallId,
+          //   //   direction: isOutbound ? 'outbound' : 'inbound',
+          //   // });
+          //
+          //   session.on('accepted', this.onSessionAccepted.bind(this));
+          //   session.on('confirmed', this.onSessionConfirmed.bind(this));
+          //   session.on('failed', this.onSessionEnded.bind(this));
+          //   session.on('ended', this.onSessionEnded.bind(this));
+          //   session.on('progress', this.onSessionProgress.bind(this));
+          // });
+          // )
           .catch(console.error);
         resolve(ua);
       });
@@ -362,6 +375,52 @@ export default class VoiceSDK {
 
       ua.start();
     });
+  }
+
+  private _onSession(e: IncomingRTCSessionEvent | OutgoingRTCSessionEvent, opts?: CallOptions) {
+    const { session, request, originator } = e || {};
+    if (!session || !originator?.length) {
+      console.error('UA[_onSession]: Invalid session', e);
+      return;
+    }
+
+    if (this._dialog && !this._dialog.isTerminated()) {
+      console.warn(`UA[_onSession]: Call already in progress: ${this._dialog.id}`);
+      return this._dialog?.session?.terminate({
+        status_code: 486,
+        cause: C.causes.BUSY,
+        reason_phrase: 'CALL_IN_PROGRESS',
+      });
+    }
+
+    console.log('UA[_onSession]: ', request, opts);
+
+    const sipInbound = originator === 'remote';
+    const directionHeader = request?.getHeader(DIRECTION_HEADER);
+    const isInbound = sipInbound && 'outbound' !== directionHeader;
+    const callId = request?.getHeader('call-id') || Utils.newUUID();
+
+    if (!this._dialog || this._dialog.isTerminated()) {
+      const finalDelegate = {
+        rtc: opts?.delegate?.rtc ?? this._config.delegate?.rtc,
+        callCreated: opts?.delegate?.callCreated ?? this._config.delegate?.callCreated,
+        callConnected: opts?.delegate?.callConnected ?? this._config.delegate?.callConnected,
+        callTerminated: opts?.delegate?.callTerminated ?? this._config.delegate?.callTerminated,
+      } as CallDelegate;
+
+      this._dialog = new Dialog(session, finalDelegate);
+      this._dialog.id = callId;
+      if (finalDelegate?.rtc) {
+        Object.entries(finalDelegate?.rtc).forEach(([event, handler]) => session.once(event, handler));
+      }
+      finalDelegate?.callCreated?.(request?.from?.uri?.user, request?.to?.uri?.user, { id: callId, isInbound });
+    }
+
+    session.on('accepted', this.onSessionAccepted.bind(this));
+    session.on('confirmed', this.onSessionConfirmed.bind(this));
+    session.on('failed', this.onSessionEnded.bind(this));
+    session.on('ended', this.onSessionEnded.bind(this));
+    session.on('progress', this.onSessionProgress.bind(this));
   }
 
   // eslint-disable-next-line @typescript-eslint/no-unused-vars
@@ -403,6 +462,7 @@ export default class VoiceSDK {
     if (!this._dialog) return;
 
     this._dialog.status = 'TERMINATED';
+    delete this._dialog;
     Promise.resolve().then(() => this._dialog?.delegate?.callTerminated?.());
   }
 }
