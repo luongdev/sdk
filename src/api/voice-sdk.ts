@@ -470,9 +470,8 @@ export default class VoiceSDK {
     if (!this._dialog) return;
   }
 
-  private async onSessionConfirmed(event: IncomingAckEvent | OutgoingAckEvent) {
-    console.debug('UA[onSessionConfirmed]: ', event);
-
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
+  private async onSessionConfirmed(_event: IncomingAckEvent | OutgoingAckEvent) {
     if (!this._dialog) return;
 
     if ('CREATED' === this._dialog.status) {
