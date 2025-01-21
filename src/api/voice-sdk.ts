@@ -217,6 +217,7 @@ export default class VoiceSDK {
 
     if (this._dialog?.session) {
       this._dialog.session.terminate();
+      delete this._dialog;
     }
 
     this._ua.unregister();
@@ -298,6 +299,7 @@ export default class VoiceSDK {
     if (!this._dialog?.session) return;
 
     this._dialog.session.terminate({ cause });
+    delete this._dialog;
   }
 
   public mute() {
@@ -480,15 +482,19 @@ export default class VoiceSDK {
     }
   }
 
-  // eslint-disable-next-line @typescript-eslint/no-unused-vars
-  private async onSessionEnded(_event: EndEvent) {
+  private async onSessionEnded(event: EndEvent) {
     if (!this._dialog || this._dialog.isTerminated()) {
       return;
     }
 
+    const code = parseInt((event.message as any)?.['status_code'] ?? 200);
+    let cause = undefined;
+    if (code >= 200 && code <= 399) cause = 'OK';
+    else cause = 'SIP Failure Code' === event.cause ? (event.message as any)?.['reason_phrase'] : event.cause;
+
     this._dialog.status = 'TERMINATED';
     Promise.resolve()
-      .then(() => this._dialog?.delegate?.callTerminated?.())
+      .then(() => this._dialog?.delegate?.callTerminated?.(code, cause))
       .then(() => delete this._dialog)
       .catch(console.error);
   }

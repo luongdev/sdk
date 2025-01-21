@@ -12,7 +12,7 @@ export type CallActors = {
 
 export type CallCreatedListener = (actors: CallActors, params?: Record<string, unknown>) => void;
 export type CallConnectedListener = () => void;
-export type CallTerminatedListener = () => void;
+export type CallTerminatedListener = (code: number, cause?: string) => void;
 
 export interface CallDelegate {
   callCreated?: CallCreatedListener;
