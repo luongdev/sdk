@@ -22,6 +22,7 @@ export interface Config {
   delegate?: Delegate;
   deviceId?: string;
   iceServers?: [];
+  debug?: boolean;
 }
 
 export interface User {

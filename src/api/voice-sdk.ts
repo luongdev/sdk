@@ -1,6 +1,6 @@
 import type { Config, User, SdkResult } from '@api/types/types.ts';
 import type { ConnectOptions } from '@api/types/connections.ts';
-import { UA, URI, Utils, WebSocketInterface, C } from 'jssip';
+import { UA, URI, Utils, WebSocketInterface, C, debug } from 'jssip';
 import type { CallActors, CallDelegate, CallOptions } from '@api/types/call.ts';
 import type {
   EndEvent,
@@ -137,6 +137,8 @@ export default class VoiceSDK {
     if (!baseUrl) {
       this._config.baseUrl = 'https://connect.omicx.vn';
     }
+
+    if (cfg.debug) debug.enable('JsSIP:*');
 
     this._uaGateways = gateways.filter(g => g.startsWith('wss://') || g.startsWith('ws://')) ?? [];
     if (!this._uaGateways.length) {
