@@ -1,8 +1,7 @@
 import { debug as sipDebug, UA, URI, Utils, WebSocketInterface } from 'jssip';
 import type { Config, User } from '@api/types/types.ts';
-import type { CallDelegate } from '@api/types/call.ts';
 import type { ConnectionDelegate } from '@api/types/connections.ts';
-import type { UAConfiguration } from 'jssip/lib/UA';
+import type { RTCSessionEvent, UAConfiguration } from 'jssip/lib/UA';
 
 export const ErrConnection = new Error('Connection error');
 export const ErrTimeout = new Error('Connect timeout');
@@ -102,8 +101,10 @@ export class Signaling {
   private _ua?: UA;
 
   private readonly _timeout: number;
-  private readonly _delegate: (CallDelegate & ConnectionDelegate) | undefined;
+  private readonly _delegate: ConnectionDelegate | undefined;
   private readonly _uaBuilder: UABuilder;
+
+  private readonly _sessionHandlers: Array<(evt: RTCSessionEvent) => Promise<any>> = [];
 
   private _connected = false;
   private _registered = false;
@@ -146,6 +147,8 @@ export class Signaling {
       this._ua?.on('registered', () => {
         clearTimeout(timeoutId);
         this._registered = true;
+
+        this._bindRegisteredEvents();
         resolve(true);
       });
 
@@ -164,6 +167,8 @@ export class Signaling {
   }
 
   async connect(): Promise<boolean> {
+    if (this._ua && this._connected) return this._connected;
+
     this._ua = this._uaBuilder.build();
     this._ua.on('disconnected', ({ error, code, reason }) => {
       Promise.resolve().then(() => this._delegate?.onDisconnect?.(error, code, reason));
@@ -194,6 +199,10 @@ export class Signaling {
     });
   }
 
+  registerHandler(handler: (evt: RTCSessionEvent) => Promise<any>) {
+    this._sessionHandlers.push(handler);
+  }
+
   private _forceSetUser(user: User): boolean {
     try {
       const ua = this._ua as any;
@@ -211,20 +220,32 @@ export class Signaling {
 
     return false;
   }
+
+  private _bindRegisteredEvents() {
+    if (!this._ua || !this._registered) return;
+
+    this._ua.on('unregistered', () => {
+      this._registered = false;
+
+      this._unbindRegisteredEvents();
+    });
+
+    this._ua.on('newRTCSession', this._bindNewRTCSession.bind(this));
+  }
+
+  private _unbindRegisteredEvents() {
+    if (!this._ua || !this._registered) return;
+
+    this._ua.removeAllListeners('registrationExpiring');
+    this._ua.removeAllListeners('unregistered');
+    this._ua.removeAllListeners('newRTCSession');
+  }
+
+  private _bindNewRTCSession(evt: RTCSessionEvent) {
+    if (!evt.session || !evt.originator?.length) {
+      return;
+    }
+
+    this._sessionHandlers.forEach(h => h(evt).catch(console.error));
+  }
 }
-
-const s = new Signaling({
-  debug: true,
-  gateways: ['wss://proxy-dev.metechvn.com:7443'],
-  appName: 'voiceuat.metechvn.com',
-  appId: '',
-  secretKey: '',
-  el: '',
-});
-
-s.connect().then(async () => {
-  await s.login({
-    extension: '10000',
-    password: 'Abcd@54321',
-  });
-});
