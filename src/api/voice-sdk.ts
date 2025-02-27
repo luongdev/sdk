@@ -1,9 +1,10 @@
-import type { Config, User, SdkResult } from '@api/types/types.ts';
-import type { ConnectOptions } from '@api/types/connections.ts';
+import type { Config, User, SdkResult } from './types/types.ts';
+import type { ConnectOptions } from './types/connections.ts';
 import { UA, URI, Utils, WebSocketInterface, C, debug } from 'jssip';
-import { type CallDelegate, type CallOptions, Dialog } from '@api/types/call.ts';
+import { type CallDelegate, type CallOptions, Dialog } from './types/call.ts';
 import type { EndEvent, IncomingAckEvent, IncomingEvent, OutgoingAckEvent, OutgoingEvent } from 'jssip/lib/RTCSession';
 import type { IncomingRTCSessionEvent, OutgoingRTCSessionEvent } from 'jssip/lib/UA';
+import { Media } from '@api/media.ts';
 
 const DID_HEADER = 'X-DID';
 const DIRECTION_HEADER = 'X-DIR';
@@ -14,12 +15,14 @@ export default class VoiceSDK {
   private readonly _config: Config;
 
   private readonly _uaGateways: string[];
+  private readonly _nssGateway?: URL;
   private _ua?: UA;
 
   private readonly _timeout = 10000;
 
   private _dialog?: Dialog;
   private _localMedia?: MediaStream;
+  // private _socketClient?: SocketClient;
 
   get isConnected(): boolean {
     return !!this._ua?.isConnected();
@@ -29,8 +32,11 @@ export default class VoiceSDK {
     return !!this._ua?.isRegistered();
   }
 
+  private readonly _media: Media;
+
   private constructor(cfg: Config) {
     this._config = cfg;
+    this._media = new Media();
 
     const { baseUrl, gateways } = cfg || {};
 
@@ -44,17 +50,23 @@ export default class VoiceSDK {
     if (!this._uaGateways.length) {
       throw new Error('Missing required gateways');
     }
+
+    if (cfg.nssUrl?.length) {
+      this._nssGateway = URL.parse(cfg.nssUrl) ?? URL.parse(cfg.nssUrl, this._config.baseUrl) ?? undefined;
+
+      if (this._nssGateway) {
+        if (cfg.debug) debug.log(`VoiceSDK: Using NSS Gateway: ${this._nssGateway.href}`);
+        // const socket = new SocketClient(this._nssGateway);
+        // console.log(socket);
+      }
+    }
   }
 
   public static async init(cfg: Config, cb?: (instance: VoiceSDK) => void) {
     if (VoiceSDK._instance) return;
 
     const instance = new VoiceSDK(cfg);
-    instance._localMedia = await navigator.mediaDevices.getUserMedia({
-      video: false,
-      preferCurrentTab: true,
-      audio: cfg.deviceId?.length ? { deviceId: cfg.deviceId } : true,
-    });
+    instance._localMedia = await instance._media.requestLocal(cfg.deviceId);
 
     VoiceSDK._instance = instance;
     if (cb) {
@@ -79,6 +91,11 @@ export default class VoiceSDK {
     this._ua = await this._setup(user);
     if (!this._ua) {
       throw new Error(`Failed to setup VoiceSDK`);
+    }
+
+    if (this._nssGateway) {
+      // this._socketClient = new SocketClient(this._nssGateway, user.extension, this._config.appName, this._broadcastor);
+      // this._socketClient.setup();
     }
 
     return this.isConnected;
@@ -179,6 +196,10 @@ export default class VoiceSDK {
       };
     }
 
+    if (this._config.iceServers?.length) {
+      callOpts.pcConfig = { iceServers: this._config.iceServers };
+    }
+
     const globalCallId = Utils.newUUID();
     this._ua.prependOnceListener('newRTCSession', e => {
       const { request, originator } = e;
@@ -189,7 +210,12 @@ export default class VoiceSDK {
       this._onSession(e, opts);
     });
 
-    this._ua.call(targetUri.toString(), { ...callOpts });
+    this._ua.call(targetUri.toString(), {
+      ...callOpts,
+      pcConfig: {
+        iceServers: this._config.iceServers ?? [],
+      },
+    });
 
     result.success = true;
     result.data = { id: globalCallId, actions: this._dialog?.actions };
@@ -343,6 +369,7 @@ export default class VoiceSDK {
       if (finalDelegate?.rtc) {
         Object.entries(finalDelegate?.rtc).forEach(([event, handler]) => session.addListener(event, handler));
       }
+
       finalDelegate?.callCreated?.(this._dialog.actions, { id: callId, inbound, caller, callee });
 
       session.on('accepted', this.onSessionAccepted.bind(this));

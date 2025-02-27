@@ -18,6 +18,7 @@ export interface Config {
   secretKey: string;
   scopes?: string[];
   baseUrl?: string;
+  nssUrl?: string;
   appVersion?: string;
   delegate?: Delegate;
   deviceId?: string;
