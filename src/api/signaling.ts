@@ -1,7 +1,8 @@
-import { debug as sipDebug, UA, URI, Utils, WebSocketInterface } from 'jssip';
 import type { Config, User } from '@api/types/types.ts';
 import type { ConnectionDelegate } from '@api/types/connections.ts';
-import type { RTCSessionEvent, UAConfiguration } from 'jssip/lib/UA';
+import { Registerer, type RegistererOptions, URI, UserAgent, type UserAgentOptions } from 'sip.js';
+import { v7 as uuid } from 'uuid';
+import type { IncomingResponse } from 'sip.js/lib/core';
 
 export const ErrConnection = new Error('Connection error');
 export const ErrTimeout = new Error('Connect timeout');
@@ -9,29 +10,37 @@ export const ErrForbidden = new Error('Forbidden');
 
 class UABuilder {
   private readonly _domain: string;
-  private readonly _config: UAConfiguration;
+  private readonly _config: UserAgentOptions;
 
   private _uri: URI | undefined;
-  private _password: string | undefined;
   private _gateways: string[] = [];
   private _expires = 20;
-  private _register = false;
   private _headers = new Map<string, any>();
 
-  private _ua?: UA;
+  private _ua?: UserAgent;
 
   private constructor(domain: string) {
     this._domain = domain;
+    this._uri = new URI('sip', 'websdk', domain);
 
-    const uriStr = new URI('sip', 'sdk', domain).toString();
+    const uid = uuid();
+
     this._config = {
-      sockets: [],
-      uri: uriStr,
-      contact_uri: uriStr,
-      register_expires: 20,
-      register: false,
-      user_agent: 'OmiSDK',
-      extra_headers: [],
+      noAnswerTimeout: 10,
+      forceRport: true,
+      gracefulShutdown: true,
+      userAgentString: 'VoiceSDK',
+      viaHost: domain,
+      uri: this._uri,
+      sipjsId: uid,
+      instanceId: uid,
+      transportOptions: {
+        server: '',
+        connectionTimeout: 5,
+        keepAliveInterval: 10,
+        traceSip: false,
+      },
+      delegate: {},
     };
   }
 
@@ -47,14 +56,8 @@ class UABuilder {
     return this;
   }
 
-  setUser(user: string, password?: string): UABuilder {
-    this._uri = new URI('sip', user, this._domain);
-
-    return this.setPassword(password);
-  }
-
-  setPassword(password?: string): UABuilder {
-    this._password = password;
+  withDebug(debug?: boolean): UABuilder {
+    this._config.logLevel = debug ? 'debug' : 'error';
     return this;
   }
 
@@ -63,48 +66,52 @@ class UABuilder {
     return this;
   }
 
-  setRegister(register: boolean): UABuilder {
-    this._register = register;
-    return this;
-  }
-
   setHeader(name: string, value: any): UABuilder {
     this._headers.set(name, value);
     return this;
   }
 
-  build(): UA {
+  build(): UserAgent {
     if (this._ua) return this._ua;
 
     if (!this._gateways.length) throw new Error('Missing required gateways');
 
-    if (this._uri) {
-      const strUri = this._uri?.toString() ?? '';
-      this._config.uri = strUri;
-      this._config.contact_uri = strUri;
-    }
+    (this._config.transportOptions as any).server = this._gateways[0];
 
-    this._config.password = this._password;
-    this._config.sockets = this._gateways.map(g => new WebSocketInterface(g));
-    this._config.register = this._register;
-    this._config.register_expires = this._expires;
-
-    this._headers.forEach((k, v) => this._config.extra_headers?.push(`${k}: ${v}`));
-
-    this._ua = new UA(this._config);
+    this._ua = new UserAgent(this._config);
 
     return this._ua;
+  }
+
+  registerer(user: User): Registerer {
+    if (!this._ua) throw ErrConnection;
+
+    this._ua.contact.uri.user = user.extension;
+    this._ua.configuration.uri.user = user.extension;
+    this._ua.configuration.authorizationUsername = user.extension;
+    this._ua.configuration.authorizationPassword = user.password;
+
+    const registerOpts: RegistererOptions = {
+      refreshFrequency: 90,
+      expires: this._expires,
+      extraHeaders: Array.from(this._headers.entries()).map(([name, value]) => `${name}: ${value}`),
+    };
+
+    (registerOpts as any).params = { callId: uuid() };
+
+    return new Registerer(this._ua, registerOpts);
   }
 }
 
 export class Signaling {
-  private _ua?: UA;
+  private _ua?: UserAgent;
+  private _registerer?: Registerer;
 
   private readonly _timeout: number;
   private readonly _delegate: ConnectionDelegate | undefined;
   private readonly _uaBuilder: UABuilder;
 
-  private readonly _sessionHandlers: Array<(evt: RTCSessionEvent) => Promise<any>> = [];
+  // private readonly _sessionHandlers: Array<(evt: RTCSessionEvent) => Promise<any>> = [];
 
   private _connected = false;
   private _registered = false;
@@ -120,132 +127,158 @@ export class Signaling {
   constructor(cfg: Config, timeout = 10000) {
     const { gateways, delegate, debug, appName } = cfg || {};
 
-    this._uaBuilder = UABuilder.new(appName).setUser('10001', 'Abc@1231');
+    this._uaBuilder = UABuilder.new(appName).withDebug(debug);
 
     this._timeout = timeout;
     this._delegate = delegate;
-
-    if (!debug) sipDebug.disable();
-    else sipDebug.enable('JsSIP:*');
 
     gateways?.forEach(g => this._uaBuilder.setGateway(g));
   }
 
   async login(user: User): Promise<boolean> {
-    if (!this._ua) throw ErrConnection;
-
-    // if (!this._forceSetUser(user)) {
-    //   console.error('Failed to set user');
-    // }
-    //
-    // this._ua.set('authorization_user', user.extension);
-    // this._ua.set('password', user.password);
+    if (!this._ua || !this._connected) throw ErrConnection;
 
     return await new Promise<boolean>((resolve, reject) => {
-      const timeoutId = setTimeout(() => reject(ErrTimeout), this._timeout);
+      this._registerer = this._uaBuilder.registerer(user);
 
-      this._ua?.on('registered', () => {
-        clearTimeout(timeoutId);
-        this._registered = true;
+      let timeoutId: number | undefined;
+      this._registerer
+        .register({
+          requestDelegate: {
+            onProgress: () => {
+              timeoutId = setTimeout(() => reject(ErrTimeout), this._timeout);
+              this._registered = false;
+            },
+            onAccept: () => {
+              Promise.resolve()
+                .then(() => {
+                  clearTimeout(timeoutId);
+                  this._registered = true;
+                })
+                .then(this._bindRegisteredEvents.bind(this));
 
-        this._bindRegisteredEvents();
-        resolve(true);
-      });
+              resolve(true);
+            },
+            onReject: ({ message: { statusCode, reasonPhrase } }) => {
+              Promise.resolve()
+                .then(() => {
+                  clearTimeout(timeoutId);
+                  this._registered = false;
+                })
+                .then(() => this._delegate?.onDisconnect?.(true, statusCode, reasonPhrase));
 
-      this._ua?.once('registrationFailed', ({ response }) => {
-        clearTimeout(timeoutId);
-        this._registered = false;
-        if (403 === response?.status_code) {
-          return reject(ErrForbidden);
-        }
-
-        reject(new Error(`Failed to register ${response?.reason_phrase}`));
-      });
-
-      this._ua?.register();
+              reject(ErrForbidden);
+            },
+          },
+        })
+        .catch(reject);
     });
   }
 
   async connect(): Promise<boolean> {
     if (this._ua && this._connected) return this._connected;
 
-    this._ua = this._uaBuilder.build();
-    this._ua.on('disconnected', ({ error, code, reason }) => {
-      Promise.resolve().then(() => this._delegate?.onDisconnect?.(error, code, reason));
-
-      this._connected = false;
-      this._registered = false;
-    });
-
     return await new Promise<boolean>((resolve, reject) => {
-      let timeoutId: number;
+      this._ua = this._uaBuilder.build();
+      const timeoutId = setTimeout(() => reject(ErrTimeout), this._timeout);
+      if (this._ua.delegate) {
+        this._ua.delegate.onConnect = async () => {
+          clearTimeout(timeoutId);
+          this._connected = true;
+          this._registered = false;
 
-      this._ua?.once('connecting', () => {
-        this._connected = false;
-        timeoutId = setTimeout(() => reject(ErrTimeout), this._timeout);
-      });
+          Promise.resolve()
+            .then(() => {
+              this._connected = true;
+              this._registered = false;
+            })
+            .then(this._delegate?.onConnect)
+            .catch(console.error);
 
-      this._ua?.once('connected', () => {
-        clearTimeout(timeoutId);
+          resolve(true);
+        };
 
-        Promise.resolve().then(() => this._delegate?.onConnect?.());
+        this._ua.delegate.onDisconnect = err => {
+          clearTimeout(timeoutId);
 
-        this._connected = true;
-        this._registered = false;
-        resolve(true);
-      });
+          console.log(err);
 
-      this._ua?.start();
+          Promise.resolve()
+            .then(() => {
+              this._connected = false;
+              this._registered = false;
+            })
+            .then(() => this._delegate?.onDisconnect?.(!!err));
+
+          reject(err);
+        };
+      }
+
+      this._ua?.start().catch(reject);
     });
+    // this._ua.on('disconnected', ({ error, code, reason }) => {
+    //   Promise.resolve().then(() => this._delegate?.onDisconnect?.(error, code, reason));
+    //
+    //   this._connected = false;
+    //   this._registered = false;
+    // });
+    //
+    // return await new Promise<boolean>((resolve, reject) => {
+    //   let timeoutId: number;
+    //
+    //   this._ua?.once('connecting', () => {
+    //     this._connected = false;
+    //     timeoutId = setTimeout(() => reject(ErrTimeout), this._timeout);
+    //   });
+    //
+    //   this._ua?.once('connected', () => {
+    //     clearTimeout(timeoutId);
+    //
+    //     Promise.resolve().then(() => this._delegate?.onConnect?.());
+    //
+    //     this._connected = true;
+    //     this._registered = false;
+    //     resolve(true);
+    //   });
+    //
+    //   this._ua?.start();
+    // });
   }
 
-  registerHandler(handler: (evt: RTCSessionEvent) => Promise<any>) {
-    this._sessionHandlers.push(handler);
-  }
-
-  private _forceSetUser(user: User): boolean {
-    try {
-      const ua = this._ua as any;
-
-      const callId = Utils.newUUID();
-      ua['configuration']['uri']['_user'] = user.extension;
-      ua['_contact']['uri']['_user'] = user.extension;
-      ua['_registrator']['_call_id'] = callId;
-      ua['_registrator']['_contact'] = `<${ua?.contact?.uri?.toString()}>`;
-
-      return true;
-    } catch (err) {
-      console.error(err);
-    }
-
-    return false;
-  }
+  // registerHandler(handler: (evt: RTCSessionEvent) => Promise<any>) {
+  //   this._sessionHandlers.push(handler);
+  // }
 
   private _bindRegisteredEvents() {
     if (!this._ua || !this._registered) return;
 
-    this._ua.on('unregistered', () => {
-      this._registered = false;
-
-      this._unbindRegisteredEvents();
+    this._registerer?.stateChange.addListener(data => {
+      if ('Unregistered' === data) {
+        this._registered = false;
+      } else if ('Registered' === data) {
+        this._registered = true;
+      }
     });
 
-    this._ua.on('newRTCSession', this._bindNewRTCSession.bind(this));
+    this._ua.delegate = this._ua.delegate || {};
+    this._ua.delegate.onInvite = invitation => {
+      console.log('day la invitation', invitation);
+    };
   }
-
-  private _unbindRegisteredEvents() {
-    if (!this._ua || !this._registered) return;
-
-    this._ua.removeAllListeners('registrationExpiring');
-    this._ua.removeAllListeners('unregistered');
-    this._ua.removeAllListeners('newRTCSession');
-  }
-
-  private _bindNewRTCSession(evt: RTCSessionEvent) {
-    if (!evt.session || !evt.originator?.length) {
-      return;
-    }
-
-    this._sessionHandlers.forEach(h => h(evt).catch(console.error));
-  }
+  //
+  // private _unbindRegisteredEvents() {
+  //   if (!this._ua || !this._registered) return;
+  //
+  //   this._ua.removeAllListeners('registrationExpiring');
+  //   this._ua.removeAllListeners('unregistered');
+  //   this._ua.removeAllListeners('newRTCSession');
+  // }
+  //
+  // private _bindNewRTCSession(evt: RTCSessionEvent) {
+  //   if (!evt.session || !evt.originator?.length) {
+  //     return;
+  //   }
+  //
+  //   this._sessionHandlers.forEach(h => h(evt).catch(console.error));
+  // }
 }
