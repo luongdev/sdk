@@ -120,7 +120,7 @@ export class Signaling {
   constructor(cfg: Config, timeout = 10000) {
     const { gateways, delegate, debug, appName } = cfg || {};
 
-    this._uaBuilder = UABuilder.new(appName);
+    this._uaBuilder = UABuilder.new(appName).setUser('10001', 'Abc@1231');
 
     this._timeout = timeout;
     this._delegate = delegate;
@@ -134,12 +134,12 @@ export class Signaling {
   async login(user: User): Promise<boolean> {
     if (!this._ua) throw ErrConnection;
 
-    if (!this._forceSetUser(user)) {
-      console.error('Failed to set user');
-    }
-
-    this._ua.set('authorization_user', user.extension);
-    this._ua.set('password', user.password);
+    // if (!this._forceSetUser(user)) {
+    //   console.error('Failed to set user');
+    // }
+    //
+    // this._ua.set('authorization_user', user.extension);
+    // this._ua.set('password', user.password);
 
     return await new Promise<boolean>((resolve, reject) => {
       const timeoutId = setTimeout(() => reject(ErrTimeout), this._timeout);
@@ -211,7 +211,7 @@ export class Signaling {
       ua['configuration']['uri']['_user'] = user.extension;
       ua['_contact']['uri']['_user'] = user.extension;
       ua['_registrator']['_call_id'] = callId;
-      ua['_registrator']['_contact'] = ua?.contact?.uri?.toString();
+      ua['_registrator']['_contact'] = `<${ua?.contact?.uri?.toString()}>`;
 
       return true;
     } catch (err) {

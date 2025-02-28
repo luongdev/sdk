@@ -1,14 +1,17 @@
 import { ErrConnection, Signaling } from '@api/signaling.ts';
 import { Media } from '@api/media.ts';
 import type { Config, SdkResult, User } from '@api/types/types.ts';
+import { SessionHandlerFactory } from '@api/session.ts';
 
 export class VoipSDK {
   private readonly _signaling: Signaling;
   private readonly _media: Media;
+  private readonly _sessionHandlerFactory: SessionHandlerFactory;
 
   private constructor(cfg: Config) {
     this._media = new Media();
     this._signaling = new Signaling(cfg);
+    this._sessionHandlerFactory = new SessionHandlerFactory(cfg.delegate);
   }
 
   private static _instance: VoipSDK;
@@ -17,6 +20,11 @@ export class VoipSDK {
 
     const instance = new VoipSDK(cfg);
     await instance._media.requestLocal(cfg.deviceId);
+
+    instance._signaling.registerHandler(async e => {
+      const handler = instance._sessionHandlerFactory.create();
+      await handler.handle(e);
+    });
 
     VoipSDK._instance = instance;
     if (cb) {
@@ -43,7 +51,7 @@ export default VoipSDK;
 VoipSDK.init(
   {
     debug: true,
-    gateways: ['wss://proxy-dev.metechvn.com:7443'],
+    gateways: ['ws://103.229.40.170:7080'],
     appName: 'voiceuat.metechvn.com',
     appId: '',
     secretKey: '',
@@ -51,8 +59,8 @@ VoipSDK.init(
   },
   async cb => {
     await cb.login({
-      extension: '10000',
-      password: 'Abcd@54321',
+      extension: '10001',
+      password: 'Abc@1231',
     });
   },
 ).catch(console.error);
