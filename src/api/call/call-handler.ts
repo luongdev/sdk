@@ -1,27 +1,35 @@
-import { Invitation, Inviter, UserAgent, URI } from 'sip.js';
+import { Invitation, Inviter } from 'sip.js';
 import type { CallDelegate } from '../types/call';
 import { CallDirection } from '../types/call';
 import { Media } from '../media';
 import { Dialog, type DialogOptions } from './dialog';
+import type { SipProvider, CallSessionObserver } from '../types/sip';
 
-export class CallHandler {
+export class CallHandler implements CallSessionObserver {
   private _currentDialog?: Dialog;
   private _delegate?: CallDelegate;
-  private _userAgent?: UserAgent;
   private readonly _media: Media;
   private readonly _domain: string;
+  private readonly _sipProvider: SipProvider;
 
-  constructor(media: Media, domain: string) {
+  constructor(media: Media, domain: string, sipProvider: SipProvider) {
     this._media = media;
     this._domain = domain;
-  }
+    this._sipProvider = sipProvider;
 
-  setUserAgent(userAgent: UserAgent) {
-    this._userAgent = userAgent;
+    this._sipProvider.addCallSessionObserver(this);
   }
 
   setDelegate(delegate?: CallDelegate) {
     this._delegate = delegate;
+  }
+
+  handleIncomingCall(invitation: Invitation): void {
+    this.handleIncoming(invitation);
+  }
+
+  handleOutgoingCall(inviter: Inviter): void {
+    this.handleOutgoing(inviter);
   }
 
   handleIncoming(invitation: Invitation): void {
@@ -36,9 +44,7 @@ export class CallHandler {
       delegate: {
         ...this._delegate,
         callTerminated: (code, cause) => {
-          // Tự động xóa dialog khi cuộc gọi kết thúc
           this.clearCurrentDialog();
-          // Chuyển tiếp sự kiện cho delegate gốc
           this._delegate?.callTerminated?.(code, cause);
         },
       },
@@ -49,33 +55,26 @@ export class CallHandler {
     this._delegate?.callCreated?.(dialog.actions);
   }
 
-  async makeCall(target: string): Promise<void> {
-    if (!this._userAgent) {
-      throw new Error('UserAgent not set');
-    }
-
+  handleOutgoing(inviter: Inviter): void {
     if (this._currentDialog) {
-      throw new Error('Call in progress');
+      console.warn('Call in progress, cannot handle outgoing call');
+      return;
     }
 
-    const targetUri = new URI('sip', target, this._domain);
-    const inviterOptions: any = {
+    const options: any = {
       sessionDescriptionHandlerOptions: {},
     };
 
-    const localStream = this._media.local;
-    if (localStream) {
-      inviterOptions.sessionDescriptionHandlerOptions.tracks = localStream.getTracks();
+    if (this._media.local) {
+      options.sessionDescriptionHandlerOptions.tracks = this._media.local.getTracks();
     } else {
-      inviterOptions.sessionDescriptionHandlerOptions.constraints = {
+      options.sessionDescriptionHandlerOptions.constraints = {
         audio: true,
         video: false,
       };
     }
 
-    const inviter = new Inviter(this._userAgent, targetUri, inviterOptions);
-
-    const options: DialogOptions = {
+    const dialogOptions: DialogOptions = {
       domain: this._domain,
       media: this._media,
       delegate: {
@@ -87,14 +86,29 @@ export class CallHandler {
       },
     };
 
-    const dialog = new Dialog(inviter, CallDirection.Outbound, options);
+    const dialog = new Dialog(inviter, CallDirection.Outbound, dialogOptions);
     this._currentDialog = dialog;
     this._delegate?.callCreated?.(dialog.actions);
 
-    try {
-      await inviter.invite();
-    } catch (error) {
+    inviter.invite(options).catch(error => {
+      console.error('Error starting outgoing call:', error);
       this._currentDialog = undefined;
+    });
+  }
+
+  async makeCall(target: string): Promise<void> {
+    if (!this._sipProvider.isReady()) {
+      throw new Error('SIP connection not ready');
+    }
+
+    if (this._currentDialog) {
+      throw new Error('Call in progress');
+    }
+
+    try {
+      this._sipProvider.createOutgoingCall(target);
+    } catch (error) {
+      console.error('Error creating outgoing call:', error);
       throw error;
     }
   }

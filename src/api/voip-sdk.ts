@@ -12,14 +12,11 @@ export class VoipSDK {
   private constructor(cfg: Config) {
     this._media = new Media();
     this._signaling = new Signaling(cfg);
-    this._callHandler = new CallHandler(this._media, cfg.appName);
+    this._callHandler = new CallHandler(this._media, cfg.appName, this._signaling);
 
     if (cfg.delegate) {
       this._callHandler.setDelegate(cfg.delegate);
     }
-
-    // Bind call handler to signaling
-    this._signaling.setCallHandler(this._callHandler);
   }
 
   private static _instance: VoipSDK;
@@ -28,11 +25,6 @@ export class VoipSDK {
 
     const instance = new VoipSDK(cfg);
     await instance._media.requestLocal(cfg.deviceId);
-
-    // instance._signaling.registerHandler(async e => {
-    //   const handler = instance._sessionHandlerFactory.create();
-    //   await handler.handle(e);
-    // });
 
     VoipSDK._instance = instance;
     if (cb) {
@@ -50,15 +42,19 @@ export class VoipSDK {
   }
 
   public async makeCall(target: string): Promise<SdkResult> {
-    if (!this._signaling.connected || !this._signaling.registered) {
-      return { success: false, error: ErrConnection.message };
-    }
-
     try {
+      if (!this._signaling.isReady()) {
+        throw ErrConnection;
+      }
+
       await this._callHandler.makeCall(target);
       return { success: true };
-    } catch (error: any) {
-      return { success: false, error: error.message };
+    } catch (error) {
+      console.error('Error making call:', error);
+      return {
+        success: false,
+        error: error instanceof Error ? error.message : String(error),
+      };
     }
   }
 
@@ -86,7 +82,7 @@ let count = 0;
 
 VoipSDK.init(
   {
-    debug: true,
+    // debug: true,
     gateways: ['ws://101.99.20.58:7080'],
     appName: 'voiceuat.metechvn.com',
     appId: '',
@@ -117,7 +113,7 @@ VoipSDK.init(
         extension: '10000',
         password: 'Abcd@54321',
       });
-      // cb.makeCall('0817720890');
+      cb.makeCall('20000');
     } catch (e: any) {
       console.error(e);
     }

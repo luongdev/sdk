@@ -1,26 +1,18 @@
 import type { Config, User } from '@api/types/types.ts';
 import type { ConnectionDelegate } from '@api/types/connections.ts';
+import type { SipProvider, CallSessionObserver } from '@api/types/sip.ts';
 import {
-  Ack,
   Bye,
-  Cancel,
-  Info,
   Invitation,
-  Inviter,
-  Message,
-  Notification,
   Referral,
   Registerer,
   URI,
   UserAgent,
-  type InviterOptions,
   type RegistererOptions,
-  type SessionDescriptionHandler,
   type UserAgentOptions,
+  Inviter,
 } from 'sip.js';
 import { v7 as uuid } from 'uuid';
-import { IncomingRequestMessage, type IncomingResponse } from 'sip.js/lib/core';
-import { CallHandler } from '@api/call/call-handler.ts';
 
 export const ErrConnection = new Error('Connection error');
 export const ErrTimeout = new Error('Connect timeout');
@@ -119,17 +111,15 @@ class UABuilder {
   }
 }
 
-export class Signaling {
+export class Signaling implements SipProvider {
   private _ua?: UserAgent;
   private _registerer?: Registerer;
-  private _callHandler?: CallHandler;
+  private _callSessionObservers: CallSessionObserver[] = [];
 
   private readonly _timeout: number;
   private readonly _appName: string;
   private readonly _delegate: ConnectionDelegate | undefined;
-  private readonly _uaBuilder: UABuilder;
-
-  // private readonly _sessionHandlers: Array<(evt: RTCSessionEvent) => Promise<any>> = [];
+  private _uaBuilder: UABuilder;
 
   private _connected = false;
   private _registered = false;
@@ -142,6 +132,49 @@ export class Signaling {
     return this._registered;
   }
 
+  getUserAgent(): UserAgent | undefined {
+    return this._ua;
+  }
+
+  isReady(): boolean {
+    return !!this._ua && this._connected && this._registered;
+  }
+
+  createUri(target: string): URI {
+    const uri = UserAgent.makeURI(`sip:${target}@${this._appName}`);
+    if (!uri) {
+      throw new Error(`Failed to create URI for target: ${target}`);
+    }
+    return uri;
+  }
+
+  addCallSessionObserver(observer: CallSessionObserver): void {
+    if (!this._callSessionObservers.includes(observer)) {
+      this._callSessionObservers.push(observer);
+    }
+  }
+
+  removeCallSessionObserver(observer: CallSessionObserver): void {
+    const index = this._callSessionObservers.indexOf(observer);
+    if (index !== -1) {
+      this._callSessionObservers.splice(index, 1);
+    }
+  }
+
+  createOutgoingCall(target: string): Inviter {
+    if (!this.isReady()) throw ErrConnection;
+    if (this._callSessionObservers.length === 0) throw new Error('No call handler registered');
+
+    const targetUri = this.createUri(target);
+    const inviter = new Inviter(this._ua!, targetUri, {});
+
+    this._callSessionObservers.forEach(observer => {
+      observer.handleOutgoingCall(inviter);
+    });
+
+    return inviter;
+  }
+
   constructor(cfg: Config, timeout = 10000) {
     const { gateways, delegate, debug, appName } = cfg || {};
 
@@ -152,6 +185,17 @@ export class Signaling {
     this._delegate = delegate;
 
     gateways?.forEach(g => this._uaBuilder.setGateway(g));
+
+    this._ua = this._uaBuilder.build();
+
+    this._ua.delegate = {
+      onInvite: (invitation: Invitation) => {
+        console.log('Incoming call received');
+        this._callSessionObservers.forEach(observer => {
+          observer.handleIncomingCall(invitation);
+        });
+      },
+    };
   }
 
   async login(user: User): Promise<boolean> {
@@ -198,9 +242,8 @@ export class Signaling {
     if (this._ua && this._connected) return this._connected;
 
     return await new Promise<boolean>((resolve, reject) => {
-      this._ua = this._uaBuilder.build();
       const timeoutId = setTimeout(() => reject(ErrTimeout), this._timeout);
-      if (this._ua.delegate) {
+      if (this._ua && this._ua.delegate) {
         this._ua.delegate.onConnect = async () => {
           clearTimeout(timeoutId);
           this._connected = true;
@@ -238,72 +281,17 @@ export class Signaling {
   }
 
   async makeCall(target: string): Promise<string> {
-    if (!this._ua || !this._connected || !this._registered) throw ErrConnection;
+    if (!this.isReady()) throw ErrConnection;
+    if (this._callSessionObservers.length === 0) throw new Error('No call handler registered');
 
-    const inviterOpts: InviterOptions = {
-      delegate: {
-        onInvite(request: IncomingRequestMessage, response: string, statusCode: number) {
-          console.log('day la request', request);
-          console.log('day la response', response);
-          console.log('day la statusCode', statusCode);
-        },
-        onMessage(message: Message) {
-          console.log('day la message', message);
-        },
-        onCancel(cancel: Cancel) {
-          console.log('day la cancel', cancel);
-        },
-        onAck(ack: Ack) {
-          console.log('day la ack', ack);
-        },
-        onRefer(referral: Referral) {
-          console.log('day la referral', referral);
-        },
-        onNotify(notification: Notification) {
-          console.log('day la notification', notification);
-        },
-        onInfo(info: Info) {
-          console.log('day la info', info);
-        },
-        onSessionDescriptionHandler(sessionDescriptionHandler: SessionDescriptionHandler, provisional: boolean) {
-          console.log('day la sessionDescriptionHandler', sessionDescriptionHandler);
-          console.log('day la provisional', provisional);
-        },
-        onBye: (bye: Bye) => {
-          console.log('day la bye', bye);
-          if (this._callHandler) {
-            this._callHandler.resetState();
-          }
-        },
-      },
-    };
-    (inviterOpts as any).params = { callId: uuid() };
-    const inviter = new Inviter(this._ua, new URI('sip', target, this._appName), inviterOpts);
+    const targetUri = this.createUri(target);
+    console.log(`Creating call to ${targetUri.toString()}`);
 
-    await inviter.invite({
-      requestDelegate: {
-        onProgress(response: IncomingResponse) {
-          console.log('day la onProgress', response);
-        },
-        onTrying(response: IncomingResponse) {
-          console.log('day la onTrying', response);
-        },
-        onRedirect(response: IncomingResponse) {
-          console.log('day la onRedirect', response);
-        },
-      },
-      requestOptions: {},
-    });
+    const callId = uuid();
 
-    return '';
-  }
+    this.createOutgoingCall(target);
 
-  // registerHandler(handler: (evt: RTCSessionEvent) => Promise<any>) {
-  //   this._sessionHandlers.push(handler);
-  // }
-
-  setCallHandler(handler: CallHandler) {
-    this._callHandler = handler;
+    return callId;
   }
 
   private _bindRegisteredEvents() {
@@ -320,21 +308,18 @@ export class Signaling {
     this._ua.delegate = {
       ...this._ua.delegate,
       onInvite: (invitation: Invitation) => {
-        if (this._callHandler) {
-          invitation.delegate = {
-            ...invitation.delegate,
-            onBye: (bye: Bye) => {
-              console.log('Incoming call BYE received', bye);
-              if (this._callHandler) {
-                this._callHandler.resetState();
-              }
-            },
-          };
+        invitation.delegate = {
+          ...invitation.delegate,
+          onBye: (bye: Bye) => {
+            console.log('Incoming call BYE received', bye);
+          },
+        };
 
-          this._callHandler.handleIncoming(invitation);
+        for (const observer of this._callSessionObservers) {
+          observer.handleIncomingCall(invitation);
         }
       },
-      onRefer: referral => {
+      onRefer: (referral: Referral) => {
         console.log('day la referral', referral);
       },
     };
