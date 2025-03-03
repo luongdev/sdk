@@ -45,7 +45,7 @@ export class VoipSDK {
   }
 
   public async makeCall(target: string, opts?: CallOptions): Promise<SdkResult> {
-    this._signaling.makeCall(target, opts);
+    this._signaling.makeCall(target);
 
     return { success: true };
   }

@@ -2,12 +2,16 @@ import { defineConfig } from 'vite';
 import vue from '@vitejs/plugin-vue';
 
 import { env } from 'process';
-import path from 'path';
+import path from 'node:path';
 
 const nodeEnv = env.NODE_ENV ?? 'production';
 
 // https://vite.dev/config/
 export default defineConfig({
+  server: {
+    port: 5173,
+    host: '0.0.0.0',
+  },
   plugins: [vue()],
   css: {
     preprocessorOptions: {
