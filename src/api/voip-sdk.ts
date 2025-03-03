@@ -1,18 +1,25 @@
 import { ErrConnection, Signaling } from '@api/signaling.ts';
 import { Media } from '@api/media.ts';
 import type { Config, SdkResult, User } from '@api/types/types.ts';
-import { SessionHandlerFactory } from '@api/session.ts';
-import type { CallOptions } from '@api/types/call.ts';
+import type { CallDelegate } from '@api/types/call.ts';
+import { CallHandler } from '@api/call/call-handler.ts';
 
 export class VoipSDK {
   private readonly _signaling: Signaling;
   private readonly _media: Media;
-  private readonly _sessionHandlerFactory: SessionHandlerFactory;
+  private readonly _callHandler: CallHandler;
 
   private constructor(cfg: Config) {
     this._media = new Media();
     this._signaling = new Signaling(cfg);
-    this._sessionHandlerFactory = new SessionHandlerFactory(cfg.delegate);
+    this._callHandler = new CallHandler(this._media, cfg.appName);
+
+    if (cfg.delegate) {
+      this._callHandler.setDelegate(cfg.delegate);
+    }
+
+    // Bind call handler to signaling
+    this._signaling.setCallHandler(this._callHandler);
   }
 
   private static _instance: VoipSDK;
@@ -26,8 +33,6 @@ export class VoipSDK {
     //   const handler = instance._sessionHandlerFactory.create();
     //   await handler.handle(e);
     // });
-
-    console.log(instance);
 
     VoipSDK._instance = instance;
     if (cb) {
@@ -44,14 +49,40 @@ export class VoipSDK {
     return { success: await this._signaling.login(user) };
   }
 
-  public async makeCall(target: string, opts?: CallOptions): Promise<SdkResult> {
-    this._signaling.makeCall(target);
+  public async makeCall(target: string): Promise<SdkResult> {
+    if (!this._signaling.connected || !this._signaling.registered) {
+      return { success: false, error: ErrConnection.message };
+    }
 
-    return { success: true };
+    try {
+      await this._callHandler.makeCall(target);
+      return { success: true };
+    } catch (error: any) {
+      return { success: false, error: error.message };
+    }
+  }
+
+  public async endCall(): Promise<SdkResult> {
+    try {
+      const result = await this._callHandler.endCurrentCall();
+      return { success: result };
+    } catch (error: any) {
+      return { success: false, error: error.message };
+    }
+  }
+
+  public resetCallState(): void {
+    this._callHandler.resetState();
+  }
+
+  public setCallDelegate(delegate: CallDelegate) {
+    this._callHandler.setDelegate(delegate);
   }
 }
 
 export default VoipSDK;
+
+let count = 0;
 
 VoipSDK.init(
   {
@@ -61,6 +92,24 @@ VoipSDK.init(
     appId: '',
     secretKey: '',
     el: '',
+    delegate: {
+      callCreated: (actors, params) => {
+        console.log('callCreated', actors, params);
+
+        if (count % 2 === 0) {
+          setTimeout(() => {
+            actors.answerer();
+          }, 3000);
+        } else {
+          actors.terminator();
+        }
+
+        count++;
+      },
+      callConnected: () => {
+        console.log('callConnected');
+      },
+    },
   },
   async cb => {
     try {

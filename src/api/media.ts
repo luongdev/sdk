@@ -1,6 +1,7 @@
 export class Media {
   private _localStream?: MediaStream;
   private _remoteStream?: MediaStream;
+  private _audioElement?: HTMLAudioElement;
 
   constructor() {}
 
@@ -38,18 +39,56 @@ export class Media {
 
   closeRemote() {
     if (this._remoteStream) {
-      this._remoteStream.getTracks().forEach(t => t.stop());
+      this._remoteStream.getTracks().forEach(t => {
+        t.stop();
+        this._remoteStream?.removeTrack(t);
+      });
       this._remoteStream = undefined;
     }
+
+    if (this._audioElement) {
+      this._audioElement.pause();
+      this._audioElement.srcObject = null;
+      this._audioElement = undefined;
+    }
+
+    console.log('Remote media resources cleaned up');
   }
 
   play(stream?: MediaStream) {
     stream = stream || this._remoteStream;
 
     if (stream) {
-      const audio = new Audio();
-      audio.srcObject = stream;
-      audio.play().catch(console.error);
+      if (this._audioElement) {
+        this._audioElement.pause();
+        this._audioElement.srcObject = null;
+      }
+
+      this._audioElement = new Audio();
+      this._audioElement.autoplay = true;
+      this._audioElement.srcObject = stream;
+
+      const playPromise = this._audioElement.play();
+      if (playPromise !== undefined) {
+        playPromise
+          .then(() => {
+            console.log('Audio playback started successfully');
+          })
+          .catch(error => {
+            console.error('Audio playback failed:', error);
+            setTimeout(() => {
+              if (this._audioElement) {
+                this._audioElement.play().catch(console.error);
+              }
+            }, 1000);
+          });
+      }
     }
+  }
+
+  reset() {
+    this.closeLocal();
+    this.closeRemote();
+    console.log('All media resources reset');
   }
 }

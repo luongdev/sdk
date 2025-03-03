@@ -5,28 +5,28 @@ import {
   Bye,
   Cancel,
   Info,
+  Invitation,
   Inviter,
-  type InviterOptions,
   Message,
   Notification,
   Referral,
   Registerer,
-  type RegistererOptions,
-  type SessionDescriptionHandler,
-  SessionState,
   URI,
   UserAgent,
+  type InviterOptions,
+  type RegistererOptions,
+  type SessionDescriptionHandler,
   type UserAgentOptions,
 } from 'sip.js';
 import { v7 as uuid } from 'uuid';
 import { IncomingRequestMessage, type IncomingResponse } from 'sip.js/lib/core';
+import { CallHandler } from '@api/call/call-handler.ts';
 
 export const ErrConnection = new Error('Connection error');
 export const ErrTimeout = new Error('Connect timeout');
 export const ErrForbidden = new Error('Forbidden');
 
 class UABuilder {
-  private readonly _domain: string;
   private readonly _config: UserAgentOptions;
 
   private _uri: URI | undefined;
@@ -37,7 +37,6 @@ class UABuilder {
   private _ua?: UserAgent;
 
   private constructor(domain: string) {
-    this._domain = domain;
     this._uri = new URI('sip', 'websdk', domain);
 
     const uid = uuid();
@@ -123,6 +122,7 @@ class UABuilder {
 export class Signaling {
   private _ua?: UserAgent;
   private _registerer?: Registerer;
+  private _callHandler?: CallHandler;
 
   private readonly _timeout: number;
   private readonly _appName: string;
@@ -269,8 +269,11 @@ export class Signaling {
           console.log('day la sessionDescriptionHandler', sessionDescriptionHandler);
           console.log('day la provisional', provisional);
         },
-        onBye(bye: Bye) {
+        onBye: (bye: Bye) => {
           console.log('day la bye', bye);
+          if (this._callHandler) {
+            this._callHandler.resetState();
+          }
         },
       },
     };
@@ -299,6 +302,10 @@ export class Signaling {
   //   this._sessionHandlers.push(handler);
   // }
 
+  setCallHandler(handler: CallHandler) {
+    this._callHandler = handler;
+  }
+
   private _bindRegisteredEvents() {
     if (!this._ua || !this._registered) return;
 
@@ -310,58 +317,26 @@ export class Signaling {
       }
     });
 
-    this._ua.delegate = this._ua.delegate || {};
-    this._ua.delegate.onInvite = invitation => {
-      console.log('day la invitation', invitation);
-
-      invitation.stateChange.addListener(async state => {
-        console.log('sessionState', state);
-        if (SessionState.Establishing === state) {
-          console.log('day la establishing');
-        } else if (SessionState.Established === state) {
-          const peer = (invitation.sessionDescriptionHandler as any).peerConnection as RTCPeerConnection;
-          console.log(peer);
-
-          const remoteStream = new MediaStream();
-          peer.ontrack = e => {
-            remoteStream.addTrack(e.track);
+    this._ua.delegate = {
+      ...this._ua.delegate,
+      onInvite: (invitation: Invitation) => {
+        if (this._callHandler) {
+          invitation.delegate = {
+            ...invitation.delegate,
+            onBye: (bye: Bye) => {
+              console.log('Incoming call BYE received', bye);
+              if (this._callHandler) {
+                this._callHandler.resetState();
+              }
+            },
           };
 
-          const audio = new Audio();
-          audio.srcObject = remoteStream;
-          await audio.play();
+          this._callHandler.handleIncoming(invitation);
         }
-      });
-
-      setTimeout(async () => {
-        await invitation.accept({
-          sessionDescriptionHandlerOptions: {
-            constraints: {
-              audio: true,
-              video: false,
-            },
-          },
-        });
-      }, 3000);
-    };
-    this._ua.delegate.onRefer = referral => {
-      console.log('day la referral', referral);
+      },
+      onRefer: referral => {
+        console.log('day la referral', referral);
+      },
     };
   }
-  //
-  // private _unbindRegisteredEvents() {
-  //   if (!this._ua || !this._registered) return;
-  //
-  //   this._ua.removeAllListeners('registrationExpiring');
-  //   this._ua.removeAllListeners('unregistered');
-  //   this._ua.removeAllListeners('newRTCSession');
-  // }
-  //
-  // private _bindNewRTCSession(evt: RTCSessionEvent) {
-  //   if (!evt.session || !evt.originator?.length) {
-  //     return;
-  //   }
-  //
-  //   this._sessionHandlers.forEach(h => h(evt).catch(console.error));
-  // }
 }
