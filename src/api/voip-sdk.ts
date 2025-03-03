@@ -2,6 +2,7 @@ import { ErrConnection, Signaling } from '@api/signaling.ts';
 import { Media } from '@api/media.ts';
 import type { Config, SdkResult, User } from '@api/types/types.ts';
 import { SessionHandlerFactory } from '@api/session.ts';
+import type { CallOptions } from '@api/types/call.ts';
 
 export class VoipSDK {
   private readonly _signaling: Signaling;
@@ -42,6 +43,12 @@ export class VoipSDK {
 
     return { success: await this._signaling.login(user) };
   }
+
+  public async makeCall(target: string, opts?: CallOptions): Promise<SdkResult> {
+    this._signaling.makeCall(target, opts);
+
+    return { success: true };
+  }
 }
 
 export default VoipSDK;
@@ -61,6 +68,7 @@ VoipSDK.init(
         extension: '10000',
         password: 'Abcd@54321',
       });
+      // cb.makeCall('0817720890');
     } catch (e: any) {
       console.error(e);
     }

@@ -1,8 +1,25 @@
 import type { Config, User } from '@api/types/types.ts';
 import type { ConnectionDelegate } from '@api/types/connections.ts';
-import { Registerer, type RegistererOptions, URI, UserAgent, type UserAgentOptions } from 'sip.js';
+import {
+  Ack,
+  Bye,
+  Cancel,
+  Info,
+  Inviter,
+  type InviterOptions,
+  Message,
+  Notification,
+  Referral,
+  Registerer,
+  type RegistererOptions,
+  type SessionDescriptionHandler,
+  SessionState,
+  URI,
+  UserAgent,
+  type UserAgentOptions,
+} from 'sip.js';
 import { v7 as uuid } from 'uuid';
-import type { IncomingResponse } from 'sip.js/lib/core';
+import { IncomingRequestMessage, type IncomingResponse } from 'sip.js/lib/core';
 
 export const ErrConnection = new Error('Connection error');
 export const ErrTimeout = new Error('Connect timeout');
@@ -108,6 +125,7 @@ export class Signaling {
   private _registerer?: Registerer;
 
   private readonly _timeout: number;
+  private readonly _appName: string;
   private readonly _delegate: ConnectionDelegate | undefined;
   private readonly _uaBuilder: UABuilder;
 
@@ -130,6 +148,7 @@ export class Signaling {
     this._uaBuilder = UABuilder.new(appName).withDebug(debug);
 
     this._timeout = timeout;
+    this._appName = appName;
     this._delegate = delegate;
 
     gateways?.forEach(g => this._uaBuilder.setGateway(g));
@@ -216,33 +235,64 @@ export class Signaling {
 
       this._ua?.start().catch(reject);
     });
-    // this._ua.on('disconnected', ({ error, code, reason }) => {
-    //   Promise.resolve().then(() => this._delegate?.onDisconnect?.(error, code, reason));
-    //
-    //   this._connected = false;
-    //   this._registered = false;
-    // });
-    //
-    // return await new Promise<boolean>((resolve, reject) => {
-    //   let timeoutId: number;
-    //
-    //   this._ua?.once('connecting', () => {
-    //     this._connected = false;
-    //     timeoutId = setTimeout(() => reject(ErrTimeout), this._timeout);
-    //   });
-    //
-    //   this._ua?.once('connected', () => {
-    //     clearTimeout(timeoutId);
-    //
-    //     Promise.resolve().then(() => this._delegate?.onConnect?.());
-    //
-    //     this._connected = true;
-    //     this._registered = false;
-    //     resolve(true);
-    //   });
-    //
-    //   this._ua?.start();
-    // });
+  }
+
+  async makeCall(target: string): Promise<string> {
+    if (!this._ua || !this._connected || !this._registered) throw ErrConnection;
+
+    const inviterOpts: InviterOptions = {
+      delegate: {
+        onInvite(request: IncomingRequestMessage, response: string, statusCode: number) {
+          console.log('day la request', request);
+          console.log('day la response', response);
+          console.log('day la statusCode', statusCode);
+        },
+        onMessage(message: Message) {
+          console.log('day la message', message);
+        },
+        onCancel(cancel: Cancel) {
+          console.log('day la cancel', cancel);
+        },
+        onAck(ack: Ack) {
+          console.log('day la ack', ack);
+        },
+        onRefer(referral: Referral) {
+          console.log('day la referral', referral);
+        },
+        onNotify(notification: Notification) {
+          console.log('day la notification', notification);
+        },
+        onInfo(info: Info) {
+          console.log('day la info', info);
+        },
+        onSessionDescriptionHandler(sessionDescriptionHandler: SessionDescriptionHandler, provisional: boolean) {
+          console.log('day la sessionDescriptionHandler', sessionDescriptionHandler);
+          console.log('day la provisional', provisional);
+        },
+        onBye(bye: Bye) {
+          console.log('day la bye', bye);
+        },
+      },
+    };
+    (inviterOpts as any).params = { callId: uuid() };
+    const inviter = new Inviter(this._ua, new URI('sip', target, this._appName), inviterOpts);
+
+    await inviter.invite({
+      requestDelegate: {
+        onProgress(response: IncomingResponse) {
+          console.log('day la onProgress', response);
+        },
+        onTrying(response: IncomingResponse) {
+          console.log('day la onTrying', response);
+        },
+        onRedirect(response: IncomingResponse) {
+          console.log('day la onRedirect', response);
+        },
+      },
+      requestOptions: {},
+    });
+
+    return '';
   }
 
   // registerHandler(handler: (evt: RTCSessionEvent) => Promise<any>) {
@@ -263,6 +313,39 @@ export class Signaling {
     this._ua.delegate = this._ua.delegate || {};
     this._ua.delegate.onInvite = invitation => {
       console.log('day la invitation', invitation);
+
+      invitation.stateChange.addListener(async state => {
+        console.log('sessionState', state);
+        if (SessionState.Establishing === state) {
+          console.log('day la establishing');
+        } else if (SessionState.Established === state) {
+          const peer = (invitation.sessionDescriptionHandler as any).peerConnection as RTCPeerConnection;
+          console.log(peer);
+
+          const remoteStream = new MediaStream();
+          peer.ontrack = e => {
+            remoteStream.addTrack(e.track);
+          };
+
+          const audio = new Audio();
+          audio.srcObject = remoteStream;
+          await audio.play();
+        }
+      });
+
+      setTimeout(async () => {
+        await invitation.accept({
+          sessionDescriptionHandlerOptions: {
+            constraints: {
+              audio: true,
+              video: false,
+            },
+          },
+        });
+      }, 3000);
+    };
+    this._ua.delegate.onRefer = referral => {
+      console.log('day la referral', referral);
     };
   }
   //
