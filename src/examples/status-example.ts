@@ -176,6 +176,15 @@ window.addEventListener('DOMContentLoaded', () => {
       initializeSDK();
     });
   }
+
+  // Thêm sự kiện khi trang đóng để dọn dẹp tài nguyên
+  window.addEventListener('beforeunload', () => {
+    if (sdk) {
+      console.log('Disposing SDK resources before page unload');
+      sdk.dispose();
+      sdk = null;
+    }
+  });
 });
 
 // Export các hàm cần thiết

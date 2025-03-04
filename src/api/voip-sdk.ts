@@ -144,6 +144,22 @@ export class VoipSDK {
   public getCurrentStatus(): string {
     return this._statusManager.currentStatus.status;
   }
+
+  /**
+   * Dọn dẹp tài nguyên khi không cần thiết nữa
+   * Gọi phương thức này khi ứng dụng đóng hoặc không cần sử dụng SDK nữa
+   */
+  public dispose(): void {
+    // Dọn dẹp StatusManager
+    this._statusManager.dispose();
+
+    // Dọn dẹp CallHandler
+    if (this._callHandler) {
+      this._callHandler.resetState();
+    }
+
+    console.log('VoipSDK resources disposed');
+  }
 }
 
 export default VoipSDK;
