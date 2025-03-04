@@ -65,7 +65,7 @@
     
     <div class="login-container">
         <h2>Đăng nhập</h2>
-        <input type="text" id="agentId" placeholder="Agent ID" value="agent123">
+        <input type="text" id="agentId" placeholder="Agent ID" value="10000">
         <button id="loginBtn">Đăng nhập</button>
     </div>
 
@@ -101,5 +101,13 @@
     </div>
 
     <script type="module" src="/src/examples/status-example.ts"></script>
+    <script>
+        // Debug DOM
+        document.addEventListener('DOMContentLoaded', function() {
+            console.log('DOM loaded in index.html');
+            console.log('Status section exists:', !!document.getElementById('statusSection'));
+            console.log('Status items:', document.querySelectorAll('.status-item').length);
+        });
+    </script>
 </body>
 </html>

@@ -1,7 +1,7 @@
-import VoipSDK from '../api/voip-sdk';
+import { VoipSDK } from '../api/voip-sdk';
 
 // Khởi tạo SDK
-let voiceSDK: VoipSDK | null = null;
+let sdk: VoipSDK | null = null;
 
 /**
  * Hàm cập nhật giao diện khi trạng thái thay đổi
@@ -9,85 +9,105 @@ let voiceSDK: VoipSDK | null = null;
  * @param reason Lý do thay đổi trạng thái (tùy chọn)
  */
 function updateStatusUI(status: string, reason?: string): void {
-  const currentStatusElement = document.getElementById('currentStatus');
-  if (currentStatusElement) {
-    const statusText = reason ? `${status} (${reason})` : status;
-    currentStatusElement.textContent = statusText;
+  console.log(`Updating UI with status: ${status}, reason: ${reason || 'N/A'}`);
 
-    // Cập nhật trạng thái active cho item được chọn
-    document.querySelectorAll('.status-item').forEach((item: Element) => {
-      const statusItem = item as HTMLElement;
-      if (statusItem.dataset.status === status) {
-        statusItem.classList.add('active');
-      } else {
-        statusItem.classList.remove('active');
-      }
-    });
+  // Bỏ chọn tất cả các nút
+  document.querySelectorAll('.status-item').forEach(btn => {
+    btn.classList.remove('active');
+  });
+
+  // Đánh dấu nút trạng thái hiện tại
+  const statusBtn = document.querySelector(`.status-item[data-status="${status}"]`);
+  if (statusBtn) {
+    statusBtn.classList.add('active');
+    console.log(`Activated status button for: ${status}`);
+  } else {
+    console.warn(`Status button not found for: ${status}`);
+  }
+
+  // Hiển thị trạng thái hiện tại
+  const statusElement = document.getElementById('currentStatus');
+  if (statusElement) {
+    statusElement.textContent = status + (reason ? ` (${reason})` : '');
+    console.log(`Updated status text to: ${statusElement.textContent}`);
+  } else {
+    console.warn('Status element not found');
   }
 }
 
 /**
- * Thiết lập delegate cho VoiceSDK
- */
-function setupDelegate(): any {
-  return {
-    onStatus: (status: string, reason?: string) => {
-      console.log(`Agent status changed to: ${status}${reason ? `, Reason: ${reason}` : 'No reason provided'}`);
-      updateStatusUI(status, reason);
-    },
-  };
-}
-
-/**
  * Hàm khởi tạo SDK và thiết lập các sự kiện
- * @param agentId ID của agent
  */
-function initializeSDK(agentId: string): void {
-  // Khởi tạo SDK với thông tin agent
+function initializeSDK() {
+  console.log('Initializing SDK...');
+
+  // Hiển thị phần đổi trạng thái ngay lập tức (để test)
+  const statusSection = document.getElementById('statusSection');
+  if (statusSection) {
+    statusSection.style.display = 'block';
+    console.log('Status section is now visible (before SDK init)');
+  } else {
+    console.error('Status section element not found (before SDK init)!');
+  }
+
+  // Khởi tạo SDK với cấu hình hiện tại
   VoipSDK.init(
     {
       el: 'app',
-      appId: agentId,
+      appId: 'agent123',
       appName: 'voiceuat.metechvn.com',
       gateways: ['ws://101.99.20.58:7080'],
       secretKey: 'your-secret-key',
-      nssUrl: 'http://0.0.0.0:3000/ws',
-      delegate: setupDelegate(),
+      nssUrl: 'ws://0.0.0.0:3000/ws',
+      delegate: {
+        onStatus: (status: string, reason?: string) => {
+          console.log(`Status changed to: ${status}${reason ? `, reason: ${reason}` : ''}`);
+          updateStatusUI(status, reason);
+        },
+      },
     },
     instance => {
-      voiceSDK = instance;
+      sdk = instance;
+      console.log('SDK initialized successfully');
 
-      // Đăng nhập
-      if (voiceSDK) {
-        voiceSDK
-          .login({ extension: agentId, password: 'Abcd@54321' })
-          .then(result => {
-            if (result.success) {
-              console.log('Đăng nhập thành công');
-              const statusSection = document.getElementById('statusSection');
-              if (statusSection) {
-                statusSection.style.display = 'block';
-              }
+      // Đăng nhập sau khi khởi tạo
+      sdk
+        .login({ extension: '10000', password: 'Abcd@54321' })
+        .then(result => {
+          if (result.success) {
+            console.log('Login successful - showing status section');
 
+            // Hiển thị phần đổi trạng thái sau khi đăng nhập thành công
+            const statusSection = document.getElementById('statusSection');
+            if (statusSection) {
+              statusSection.style.display = 'block';
+              console.log('Status section is now visible');
+            } else {
+              console.error('Status section element not found!');
+              // Kiểm tra DOM
+              console.log('Document body:', document.body.innerHTML);
+            }
+
+            try {
               // Lấy trạng thái hiện tại
-              if (voiceSDK) {
-                const statusResult = voiceSDK.getAgentStatus();
-                if (statusResult.success && statusResult.status) {
-                  updateStatusUI(statusResult.status, statusResult.reason);
-                } else {
-                  updateStatusUI('OFFLINE');
+              if (sdk) {
+                console.log('Getting current agent status');
+                const currentStatus = sdk.getAgentStatus();
+                console.log('Current status result:', currentStatus);
+                if (currentStatus.success && currentStatus.status) {
+                  updateStatusUI(currentStatus.status, currentStatus.reason);
                 }
               }
-            } else {
-              console.error('Lỗi đăng nhập:', result.error);
-              alert('Đăng nhập thất bại: ' + result.error);
+            } catch (error) {
+              console.error('Error getting current status:', error);
             }
-          })
-          .catch(error => {
-            console.error('Lỗi đăng nhập:', error);
-            alert('Đăng nhập thất bại: ' + error.message);
-          });
-      }
+          } else {
+            console.error('Login failed:', result.error);
+          }
+        })
+        .catch(error => {
+          console.error('Login error:', error);
+        });
     },
   );
 }
@@ -95,78 +115,67 @@ function initializeSDK(agentId: string): void {
 /**
  * Thay đổi trạng thái của agent
  */
-async function setAgentStatus(status: string, reason?: string): Promise<void> {
-  if (!voiceSDK) {
-    alert('Vui lòng đăng nhập trước');
+function setAgentStatus(status: string, reason?: string) {
+  if (!sdk) {
+    console.error('SDK not initialized');
     return;
   }
 
-  try {
-    console.log('Đang thay đổi trạng thái thành:', status, reason ? `Lý do: ${reason}` : '');
+  console.log(`Changing status to: ${status}${reason ? `, reason: ${reason}` : ''}`);
 
-    const result = await voiceSDK.setAgentStatus({ status, reason });
-
-    if (result.success) {
-      console.log('Agent status updated successfully');
-    } else {
-      console.error('Failed to update agent status:', result.error);
-      alert('Không thể thay đổi trạng thái: ' + result.error);
-    }
-  } catch (error: any) {
-    console.error('Error changing status:', error);
-    alert('Không thể thay đổi trạng thái: ' + error.message);
-  }
+  // Sử dụng phương thức changeStatus với Promise
+  sdk
+    .changeStatus(status, reason)
+    .then(result => {
+      if (result.success) {
+        console.log('Status changed successfully:', result);
+      } else {
+        console.error('Failed to change status:', result.error);
+        alert(`Failed to change status: ${result.error}`);
+      }
+    })
+    .catch(error => {
+      console.error('Error changing status:', error);
+      alert(`Error changing status: ${error.message}`);
+    });
 }
 
 // Thiết lập sự kiện khi trang được tải
-document.addEventListener('DOMContentLoaded', () => {
-  // Hiển thị thông tin về NSS
-  const infoElement = document.createElement('div');
-  infoElement.style.marginTop = '20px';
-  infoElement.style.padding = '10px';
-  infoElement.style.backgroundColor = '#f8f8f8';
-  infoElement.style.border = '1px solid #ddd';
-  infoElement.style.borderRadius = '4px';
-  infoElement.innerHTML = `
-    <h3>Thông tin NSS</h3>
-    <p>NSS đang chạy tại: <code>http://0.0.0.0:3000</code></p>
-    <p>WebSocket path: <code>ws://0.0.0.0:3000/ws</code></p>
-  `;
-  document.body.appendChild(infoElement);
+window.addEventListener('DOMContentLoaded', () => {
+  console.log('DOM fully loaded');
 
-  // Xử lý sự kiện đăng nhập
+  // Kiểm tra các phần tử DOM
+  const statusSection = document.getElementById('statusSection');
+  console.log('Status section found:', !!statusSection);
+
+  const statusItems = document.querySelectorAll('.status-item');
+  console.log('Status items found:', statusItems.length);
+
   const loginButton = document.getElementById('loginBtn');
-  if (loginButton) {
-    loginButton.addEventListener('click', () => {
-      const agentIdInput = document.getElementById('agentId') as HTMLInputElement;
-      const agentId = agentIdInput.value.trim();
+  console.log('Login button found:', !!loginButton);
 
-      if (!agentId) {
-        alert('Vui lòng nhập Agent ID');
-        return;
+  // Khởi tạo SDK
+  initializeSDK();
+
+  // Thêm sự kiện cho các nút trạng thái
+  document.querySelectorAll('.status-item').forEach(btn => {
+    btn.addEventListener('click', event => {
+      const target = event.currentTarget as HTMLElement;
+      const status = target.dataset.status;
+      const reason = target.dataset.reason;
+
+      if (status) {
+        setAgentStatus(status, reason);
       }
-
-      initializeSDK(agentId);
-    });
-  }
-
-  // Xử lý sự kiện khi người dùng chọn trạng thái mới
-  document.querySelectorAll('.status-item').forEach((item: Element) => {
-    const statusItem = item as HTMLElement;
-    statusItem.addEventListener('click', () => {
-      if (!voiceSDK) {
-        alert('Vui lòng đăng nhập trước');
-        return;
-      }
-
-      const newStatus = statusItem.dataset.status;
-      if (!newStatus) return;
-
-      // Có thể thêm lý do nếu cần
-      const reason = prompt('Nhập lý do thay đổi trạng thái (tùy chọn):');
-      setAgentStatus(newStatus, reason || undefined);
     });
   });
+
+  // Thêm sự kiện cho nút đăng nhập
+  if (loginButton) {
+    loginButton.addEventListener('click', () => {
+      initializeSDK();
+    });
+  }
 });
 
 // Export các hàm cần thiết

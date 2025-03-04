@@ -54,9 +54,7 @@ export class SocketClient {
       this._alive = true;
     });
 
-    this._socket.on('disconnect', reason => {
-      console.log('Socket disconnected:', reason);
-      this._connecting = false;
+    this._socket.on('disconnect', _ => {
       this._connected = false;
       this._alive = false;
     });
@@ -78,12 +76,25 @@ export class SocketClient {
     });
   }
 
-  public emit(event: string, data: any): void {
+  /**
+   * Gửi sự kiện đến server
+   * @param event Tên sự kiện
+   * @param data Dữ liệu gửi đi
+   * @param callback Hàm callback được gọi khi nhận được ack từ server
+   */
+  public emit(event: string, data: any, callback?: (response: any) => void): void {
     if (!this._socket || !this._connected) {
       console.error('Cannot emit event: socket not connected');
+      if (callback) {
+        callback({ success: false, error: 'Socket not connected' });
+      }
       return;
     }
 
-    this._socket.emit(event, data);
+    if (callback) {
+      this._socket.emit(event, data, callback);
+    } else {
+      this._socket.emit(event, data);
+    }
   }
 }
