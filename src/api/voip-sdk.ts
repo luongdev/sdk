@@ -2,17 +2,21 @@ import { ErrConnection, Signaling } from '@api/signaling.ts';
 import { Media } from '@api/media.ts';
 import type { Config, SdkResult, User } from '@api/types/types.ts';
 import type { CallDelegate } from '@api/types/call.ts';
+import type { StatusDelegate, AgentStatusResult, SetAgentStatusOptions } from '@api/types/status.ts';
 import { CallHandler } from '@api/call/call-handler.ts';
+import { StatusManager } from '@api/status-manager.ts';
 
 export class VoipSDK {
   private readonly _signaling: Signaling;
   private readonly _media: Media;
   private readonly _callHandler: CallHandler;
+  private _statusManager: StatusManager;
 
   private constructor(cfg: Config) {
     this._media = new Media();
     this._signaling = new Signaling(cfg);
     this._callHandler = new CallHandler(this._media, cfg.appName, this._signaling);
+    this._statusManager = new StatusManager(cfg);
 
     if (cfg.delegate) {
       this._callHandler.setDelegate(cfg.delegate);
@@ -38,7 +42,13 @@ export class VoipSDK {
       return { success: false, error: ErrConnection.message };
     }
 
-    return { success: await this._signaling.login(user) };
+    const loginSuccess = await this._signaling.login(user);
+    if (loginSuccess) {
+      // Kết nối socket sau khi đăng nhập thành công
+      this._statusManager.connect();
+    }
+
+    return { success: loginSuccess };
   }
 
   public async makeCall(target: string): Promise<SdkResult> {
@@ -71,51 +81,116 @@ export class VoipSDK {
     this._callHandler.resetState();
   }
 
-  public setCallDelegate(delegate: CallDelegate) {
+  public setCallDelegate(delegate: CallDelegate): void {
     this._callHandler.setDelegate(delegate);
+  }
+
+  public setStatusDelegate(delegate: StatusDelegate): void {
+    // Tạo config mới với delegate đã cập nhật
+    const currentConfig = this._statusManager['_config'];
+    const updatedConfig = {
+      ...currentConfig,
+      delegate: {
+        ...currentConfig.delegate,
+        onStatus: delegate.onStatus,
+      },
+    };
+
+    // Tạo instance mới của StatusManager với config đã cập nhật
+    this._statusManager = new StatusManager(updatedConfig);
+  }
+
+  /**
+   * Thay đổi trạng thái của agent
+   * @param options Tùy chọn thay đổi trạng thái
+   * @returns Promise<SdkResult>
+   */
+  public async setAgentStatus(options: SetAgentStatusOptions): Promise<SdkResult> {
+    try {
+      const success = await this._statusManager.changeStatus(options.status, options.reason);
+      return { success };
+    } catch (error: any) {
+      return { success: false, error: error.message };
+    }
+  }
+
+  /**
+   * Lấy trạng thái hiện tại của agent
+   * @returns AgentStatusResult
+   */
+  public getAgentStatus(): AgentStatusResult {
+    try {
+      const currentStatus = this._statusManager.currentStatus;
+      return {
+        success: true,
+        status: currentStatus.status,
+        reason: currentStatus.reason,
+      };
+    } catch (error: any) {
+      return { success: false, error: error.message };
+    }
+  }
+
+  /**
+   * Thay đổi trạng thái của agent (phương thức cũ, giữ lại để tương thích ngược)
+   * @param status Trạng thái mới
+   * @param reason Lý do thay đổi trạng thái
+   * @returns Promise<SdkResult>
+   */
+  public async changeStatus(status: string, reason?: string): Promise<SdkResult> {
+    return this.setAgentStatus({ status, reason });
+  }
+
+  public getCurrentStatus(): string {
+    return this._statusManager.currentStatus.status;
   }
 }
 
 export default VoipSDK;
 
-let count = 0;
+if (window.VoiceSDK === undefined || !window.VoiceSDK) {
+  window.VoiceSDK = VoipSDK;
+}
 
-VoipSDK.init(
-  {
-    // debug: true,
-    gateways: ['ws://101.99.20.58:7080'],
-    appName: 'voiceuat.metechvn.com',
-    appId: '',
-    secretKey: '',
-    el: '',
-    delegate: {
-      callCreated: (actors, params) => {
-        console.log('callCreated', actors, params);
-
-        if (count % 2 === 0) {
-          setTimeout(() => {
-            actors.answerer();
-          }, 3000);
-        } else {
-          actors.terminator();
-        }
-
-        count++;
-      },
-      callConnected: () => {
-        console.log('callConnected');
-      },
-    },
-  },
-  async cb => {
-    try {
-      await cb.login({
-        extension: '10000',
-        password: 'Abcd@54321',
-      });
-      cb.makeCall('20000');
-    } catch (e: any) {
-      console.error(e);
-    }
-  },
-).catch(console.error);
+// Xóa phần code test bên dưới để tránh gây nhầm lẫn
+// let count = 0;
+//
+// VoipSDK.init(
+//   {
+//     // debug: true,
+//     gateways: ['ws://101.99.20.58:7080'],
+//     appName: 'voiceuat.metechvn.com',
+//     appId: '',
+//     secretKey: '',
+//     el: '',
+//     delegate: {
+//       callCreated: (actors, params) => {
+//         console.log('callCreated', actors, params);
+//
+//         if (count % 2 === 0) {
+//           setTimeout(() => {
+//             actors.answerer();
+//           }, 3000);
+//         } else {
+//           actors.terminator();
+//         }
+//
+//         count++;
+//       },
+//       callConnected: () => {
+//         console.log('callConnected');
+//       },
+//     },
+//   },
+//   async cb => {
+//     try {
+//       await cb.login({
+//         extension: '10000',
+//         password: 'Abcd@54321',
+//       });
+//       cb.makeCall('20000');
+//     } catch (e: any) {
+//       console.error(e);
+//     }
+//   },
+// ).catch(console.error);
