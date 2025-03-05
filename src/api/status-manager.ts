@@ -15,6 +15,7 @@ export class StatusManager {
   private _currentStatus: Status = { status: 'OFFLINE' };
   private _pendingStatusChange: { id: string; status: string; reason?: string } | null = null;
   private _unsubscribeLocalEvents?: () => void;
+  private _unsubscribeSocketEvents?: () => void;
   private _lastStatusTimestamp: number = 0;
 
   constructor(config: Config) {
@@ -27,7 +28,56 @@ export class StatusManager {
     if (config.nssUrl) {
       const nssUrl = new URL(config.nssUrl);
       this._socketClient = new SocketClient(nssUrl, config.appId, config.appName);
+      this._setupSocketEventHandlers();
     }
+  }
+
+  /**
+   * Thiết lập các event handler cho socket client
+   */
+  private _setupSocketEventHandlers(): void {
+    if (!this._socketClient) return;
+
+    // Hủy đăng ký handler cũ nếu có
+    if (this._unsubscribeSocketEvents) {
+      this._unsubscribeSocketEvents();
+    }
+
+    // Đăng ký handler cho sự kiện STATUS_CHANGED
+    this._unsubscribeSocketEvents = this._socketClient.addEventHandler(
+      StatusEvent.STATUS_CHANGED,
+      (data: any, metadata: any) => {
+        console.log('Status changed event received from server:', { data, metadata });
+
+        // Kiểm tra timestamp để tránh xử lý sự kiện cũ
+        if (data.timestamp && data.timestamp <= this._lastStatusTimestamp) {
+          console.log(`Ignoring outdated status message (timestamp ${data.timestamp} <= ${this._lastStatusTimestamp})`);
+          return;
+        }
+
+        // Cập nhật timestamp mới nhất
+        if (data.timestamp) {
+          this._lastStatusTimestamp = data.timestamp;
+        } else {
+          this._lastStatusTimestamp = Date.now();
+        }
+
+        // Cập nhật trạng thái hiện tại
+        const status = data.status || data.statusName;
+        const reason = data.reason || data.reasonName;
+
+        this._currentStatus = {
+          status,
+          reason,
+        };
+
+        // Thông báo cho delegate
+        this._delegate?.onStatus?.(status, reason);
+
+        // Broadcast cho các tab khác
+        this._localBroadcaster.broadcastStatusChange(status, reason);
+      },
+    );
   }
 
   private _setupLocalBroadcaster() {
@@ -59,6 +109,9 @@ export class StatusManager {
     if (this._socketClient) {
       console.log('StatusManager: Connecting socket client');
       this._socketClient.setup();
+
+      // Đảm bảo event handlers được thiết lập sau khi kết nối
+      this._setupSocketEventHandlers();
     } else {
       console.warn('StatusManager: No socket client available to connect');
     }
@@ -147,6 +200,10 @@ export class StatusManager {
   public dispose(): void {
     if (this._unsubscribeLocalEvents) {
       this._unsubscribeLocalEvents();
+    }
+
+    if (this._unsubscribeSocketEvents) {
+      this._unsubscribeSocketEvents();
     }
 
     if (this._socketClient) {

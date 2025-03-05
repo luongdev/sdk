@@ -2,11 +2,14 @@ import { io, type ManagerOptions, Socket, type SocketOptions } from 'socket.io-c
 import { StatusEvent } from '@api/types/status.ts';
 import { v7 as uuidv7 } from 'uuid';
 
+export type EventCallback = (data: any, metadata?: any) => void;
+
 export class SocketClient {
   private _socket?: Socket;
   private readonly _url: URL;
-  private readonly _opts: Partial<ManagerOptions & SocketOptions>;
   private readonly _browserId: string;
+  private readonly _opts: Partial<ManagerOptions & SocketOptions>;
+  private readonly _eventHandlers: Map<string, Set<EventCallback>> = new Map();
 
   private _connecting = false;
   private _connected = false;
@@ -53,6 +56,76 @@ export class SocketClient {
       reconnectionDelayMax: 10000,
       query: { extension, domain, browserId },
     };
+    this._eventHandlers = new Map();
+  }
+
+  public addEventHandler(eventName: string, callback: EventCallback): () => void {
+    if (!this._eventHandlers.has(eventName)) {
+      this._eventHandlers.set(eventName, new Set());
+    }
+
+    const handlers = this._eventHandlers.get(eventName)!;
+    handlers.add(callback);
+
+    console.log(`Added handler for event: ${eventName}`);
+
+    if (this._socket && this._connected && !this._socket.hasListeners(eventName)) {
+      this._registerEventListener(eventName);
+    }
+
+    return () => {
+      this.removeEventHandler(eventName, callback);
+    };
+  }
+
+  public removeEventHandler(eventName: string, callback: EventCallback): void {
+    if (this._eventHandlers.has(eventName)) {
+      const handlers = this._eventHandlers.get(eventName)!;
+      handlers.delete(callback);
+
+      if (handlers.size === 0) {
+        this._eventHandlers.delete(eventName);
+
+        if (this._socket && this._connected) {
+          this._socket.off(eventName);
+        }
+      }
+
+      console.log(`Removed handler for event: ${eventName}`);
+    }
+  }
+
+  private _registerEventListener(eventName: string): void {
+    if (!this._socket || !this._connected) {
+      return;
+    }
+
+    if (this._socket.hasListeners(eventName)) {
+      this._socket.off(eventName);
+    }
+
+    this._socket.on(eventName, (data: any, metadata: any, ack: (d: any) => void) => {
+      console.log(`Event ${eventName} received:`, { data, metadata });
+
+      this._callEventHandlers(eventName, data, metadata);
+
+      if (ack && typeof ack === 'function') {
+        ack({ success: true });
+      }
+    });
+  }
+
+  private _callEventHandlers(eventName: string, data: any, metadata?: any): void {
+    if (this._eventHandlers.has(eventName)) {
+      const handlers = this._eventHandlers.get(eventName)!;
+      handlers.forEach(handler => {
+        try {
+          handler(data, metadata);
+        } catch (error) {
+          console.error(`Error in handler for event ${eventName}:`, error);
+        }
+      });
+    }
   }
 
   public setup(): void {
@@ -68,13 +141,14 @@ export class SocketClient {
 
     console.log('Setting up new socket connection to:', this._url.origin);
     this._socket = io(this._url.origin, this._opts);
-    this._socket.connect();
 
     this._socket.on('connect', () => {
       this._connecting = false;
       this._connected = true;
       this._alive = true;
       console.log('Socket connected successfully');
+
+      this._registerAllEventListeners();
     });
 
     this._socket.on('disconnect', () => {
@@ -87,13 +161,15 @@ export class SocketClient {
       console.error('Socket connection error:', error);
     });
 
-    this._socket.on(StatusEvent.STATUS_CHANGED, (data: any, metadata: any, ack: (d: any) => void) => {
-      console.log('Status changed event received:', { data, metadata });
+    this._registerEventListener(StatusEvent.STATUS_CHANGED);
 
-      if (ack && typeof ack === 'function') {
-        ack({ success: true });
-      }
-    });
+    this._socket.connect();
+  }
+
+  private _registerAllEventListeners(): void {
+    for (const eventName of this._eventHandlers.keys()) {
+      this._registerEventListener(eventName);
+    }
   }
 
   public disconnect(): void {
