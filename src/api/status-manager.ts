@@ -110,12 +110,17 @@ export class StatusManager {
         this._localBroadcaster.broadcastStatusChange(status, reason);
 
         this._socketClient?.emit(StatusEvent.REQUEST_STATUS_CHANGE, statusData, response => {
-          if (response && response.success) {
+          if (response instanceof Error) {
+            console.error(`Status change to ${status} rejected by server:`, response.message);
+            resolve(false);
+            return;
+          }
+
+          if (response?.success) {
             console.log(`Status change to ${status} acknowledged by server`);
             resolve(true);
           } else {
             console.error(`Status change to ${status} rejected by server:`, response?.error || 'Unknown error');
-
             if (response && !response.success) {
               console.log('Server will send current status via STATUS_CHANGED event');
             }

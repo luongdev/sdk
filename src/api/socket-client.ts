@@ -28,10 +28,9 @@ export class SocketClient {
     return this._browserId;
   }
 
-  constructor(nssUrl: URL, extension: string, appName: string, browserId?: string) {
+  constructor(nssUrl: URL, extension: string, domain: string, browserId?: string) {
     this._url = nssUrl;
 
-    // Luôn tạo hoặc lấy browserId từ localStorage, không cho phép truyền từ bên ngoài
     const storedBrowserId = localStorage.getItem('mpsdk_browser_id');
     if (storedBrowserId) {
       browserId = storedBrowserId;
@@ -52,11 +51,7 @@ export class SocketClient {
       reconnectionAttempts: 10,
       reconnectionDelay: 3000,
       reconnectionDelayMax: 10000,
-      query: {
-        extension: extension,
-        domain: appName,
-        browserId: browserId,
-      },
+      query: { extension, domain, browserId },
     };
   }
 
@@ -127,8 +122,10 @@ export class SocketClient {
       return;
     }
 
+    console.log('Emitting event:', event, 'with data:', data);
+
     if (callback) {
-      this._socket.emit(event, data, callback);
+      this._socket.emitWithAck(event, data).then(callback).catch(callback);
     } else {
       this._socket.emit(event, data);
     }
