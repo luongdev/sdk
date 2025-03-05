@@ -163,6 +163,10 @@ export class VoipSDK {
     return this._statusManager.currentStatus.status;
   }
 
+  public getBrowserId(): string | undefined {
+    return this._statusManager.browserId;
+  }
+
   public dispose(): void {
     this._statusManager.dispose();
 

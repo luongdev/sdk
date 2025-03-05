@@ -109,6 +109,10 @@ export class StatusManager {
     return this._currentStatus;
   }
 
+  public get browserId(): string | undefined {
+    return this._socketClient?.browserId;
+  }
+
   public async changeStatus(status: string, reason?: string): Promise<boolean> {
     if (!this._config.nssUrl || !this._config.appId || !this._config.appName) {
       console.error('Missing required configuration for status change');

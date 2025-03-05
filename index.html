@@ -83,6 +83,7 @@
             <div id="status-display" class="status-display">Đang kết nối...</div>
             <div class="info-row">Lý do: <span id="reason-display">Chưa có thông tin</span></div>
             <div class="info-row">Thời gian cập nhật: <span id="timestamp-display">-</span></div>
+            <div class="info-row">ID trình duyệt: <span id="browser-id-display">-</span></div>
             <button id="logout-button" style="margin-top: 15px;">Đăng xuất</button>
         </div>
         
@@ -123,6 +124,7 @@
         const statusSection = document.getElementById('status-section');
         const logoutButton = document.getElementById('logout-button');
         const statusUpdateResult = document.getElementById('status-update-result');
+        const browserIdDisplay = document.getElementById('browser-id-display');
 
         let sdk;
 
@@ -264,6 +266,13 @@
                     // Hiển thị phần trạng thái
                     if (statusSection) {
                         statusSection.style.display = 'block';
+                    }
+                    
+                    // Hiển thị browserId
+                    if (browserIdDisplay) {
+                        const browserId = sdk.getBrowserId() || localStorage.getItem('mpsdk_browser_id') || 'Không xác định';
+                        browserIdDisplay.textContent = browserId;
+                        console.log('Browser ID:', browserId);
                     }
                     
                     try {

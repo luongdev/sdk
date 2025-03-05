@@ -1,11 +1,13 @@
 import { io, type ManagerOptions, Socket, type SocketOptions } from 'socket.io-client';
 import type { State } from '@api/broadcaster.ts';
 import { StatusEvent } from '@api/types/status.ts';
+import { v7 as uuidv7 } from 'uuid';
 
 export class SocketClient {
   private _socket?: Socket;
   private readonly _url: URL;
   private readonly _opts: Partial<ManagerOptions & SocketOptions>;
+  private readonly _browserId: string;
 
   private readonly _stateBroadcast: { broadcast: (state: State) => void };
 
@@ -25,8 +27,31 @@ export class SocketClient {
     return this._alive;
   }
 
-  constructor(nssUrl: URL, extension: string, appName: string, stateBroadcast: { broadcast: (state: State) => void }) {
+  get browserId(): string {
+    return this._browserId;
+  }
+
+  constructor(
+    nssUrl: URL,
+    extension: string,
+    appName: string,
+    stateBroadcast: { broadcast: (state: State) => void },
+    browserId?: string,
+  ) {
     this._url = nssUrl;
+
+    // Luôn tạo hoặc lấy browserId từ localStorage, không cho phép truyền từ bên ngoài
+    const storedBrowserId = localStorage.getItem('mpsdk_browser_id');
+    if (storedBrowserId) {
+      browserId = storedBrowserId;
+    } else {
+      browserId = `browser_${uuidv7()}`;
+      localStorage.setItem('mpsdk_browser_id', browserId);
+    }
+    console.log('Using browser ID:', browserId);
+
+    this._browserId = browserId;
+
     this._opts = {
       path: nssUrl.pathname,
       ackTimeout: 3000,
@@ -39,6 +64,7 @@ export class SocketClient {
       query: {
         extension: extension,
         domain: appName,
+        browserId: browserId,
       },
     };
 
