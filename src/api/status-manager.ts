@@ -72,7 +72,9 @@ export class StatusManager {
         };
 
         // Thông báo cho delegate
-        this._delegate?.onStatus?.(status, reason);
+        if (this._delegate?.statusChanged) {
+          this._delegate.statusChanged(status, reason);
+        }
 
         // Broadcast cho các tab khác
         this._localBroadcaster.broadcastStatusChange(status, reason);
@@ -100,7 +102,9 @@ export class StatusManager {
           reason: message.reason,
         };
 
-        this._delegate?.onStatus?.(message.status, message.reason);
+        if (this._delegate?.statusChanged) {
+          this._delegate.statusChanged(message.status, message.reason);
+        }
       },
     );
   }
@@ -158,7 +162,10 @@ export class StatusManager {
       return new Promise(resolve => {
         const newStatus = { status, reason };
         this._currentStatus = newStatus;
-        this._delegate?.onStatus?.(status, reason);
+
+        if (this._delegate?.statusChanged) {
+          this._delegate.statusChanged(status, reason);
+        }
 
         this._localBroadcaster.broadcastStatusChange(status, reason);
 

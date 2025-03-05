@@ -135,6 +135,97 @@ export class CallHandler implements CallSessionObserver {
     }
   }
 
+  async muteCall(): Promise<boolean> {
+    if (!this._currentDialog || this._currentDialog.isTerminated()) {
+      console.warn('No active call to mute');
+      return false;
+    }
+
+    try {
+      const session = (this._currentDialog as any)._session;
+      if (session && typeof session.mute === 'function') {
+        await session.mute();
+        return true;
+      }
+      return false;
+    } catch (error) {
+      console.error('Error muting call:', error);
+      return false;
+    }
+  }
+
+  async unmuteCall(): Promise<boolean> {
+    if (!this._currentDialog || this._currentDialog.isTerminated()) {
+      console.warn('No active call to unmute');
+      return false;
+    }
+
+    try {
+      const session = (this._currentDialog as any)._session;
+      if (session && typeof session.unmute === 'function') {
+        await session.unmute();
+        return true;
+      }
+      return false;
+    } catch (error) {
+      console.error('Error unmuting call:', error);
+      return false;
+    }
+  }
+
+  async holdCall(): Promise<boolean> {
+    if (!this._currentDialog || this._currentDialog.isTerminated()) {
+      console.warn('No active call to hold');
+      return false;
+    }
+
+    try {
+      const session = (this._currentDialog as any)._session;
+      if (session && typeof session.hold === 'function') {
+        await session.hold();
+        return true;
+      }
+      return false;
+    } catch (error) {
+      console.error('Error holding call:', error);
+      return false;
+    }
+  }
+
+  async unholdCall(): Promise<boolean> {
+    if (!this._currentDialog || this._currentDialog.isTerminated()) {
+      console.warn('No active call to unhold');
+      return false;
+    }
+
+    try {
+      const session = (this._currentDialog as any)._session;
+      if (session && typeof session.unhold === 'function') {
+        await session.unhold();
+        return true;
+      }
+      return false;
+    } catch (error) {
+      console.error('Error unholding call:', error);
+      return false;
+    }
+  }
+
+  async transferCall(target: string): Promise<boolean> {
+    if (!this._currentDialog || this._currentDialog.isTerminated()) {
+      console.warn('No active call to transfer');
+      return false;
+    }
+
+    try {
+      await this._currentDialog.actions.referer(target);
+      return true;
+    } catch (error) {
+      console.error('Error transferring call:', error);
+      return false;
+    }
+  }
+
   resetState() {
     if (this._currentDialog) {
       this.endCurrentCall().catch(console.error);

@@ -109,7 +109,7 @@
     <div id="app"></div>
 
     <script type="module">
-        import { VoipSDK } from '/src/api/voip-sdk.ts';
+        import { VoiceSDK } from '/src/api/voice-sdk.ts';
 
         const statusDisplay = document.getElementById('status-display');
         const reasonDisplay = document.getElementById('reason-display');
@@ -165,7 +165,7 @@
                 nssUrl: 'ws://0.0.0.0:3001/ws',
                 gateways: ['ws://101.99.20.58:7080'],
                 delegate: {
-                    onStatus: (status, reason, timestamp) => {
+                    statusChanged: (status, reason, timestamp) => {
                         console.log(`Trạng thái thay đổi: ${status}, Lý do: ${reason || 'Không có'}, Thời gian: ${timestamp || Date.now()}`);
                         updateStatusDisplay(status, reason, timestamp);
                     }
@@ -199,7 +199,7 @@
                         
                         // Sử dụng Promise để đảm bảo SDK được khởi tạo hoàn toàn trước khi tiếp tục
                         const sdkPromise = new Promise((resolve) => {
-                            VoipSDK.init(config, instance => {
+                            VoiceSDK.init(config, instance => {
                                 console.log('SDK đã được khởi tạo thành công, instance:', instance);
                                 if (instance) {
                                     sdk = instance;

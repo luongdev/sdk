@@ -1,434 +1,230 @@
-// import type { Config, User, SdkResult } from './types/types.ts';
-// import type { ConnectOptions } from './types/connections.ts';
-// import { UA, URI, Utils, WebSocketInterface, C, debug } from 'jssip';
-// import { type CallDelegate, type CallOptions, Dialog } from './types/call.ts';
-// import type { EndEvent, IncomingAckEvent, IncomingEvent, OutgoingAckEvent, OutgoingEvent } from 'jssip/lib/RTCSession';
-// import type { IncomingRTCSessionEvent, OutgoingRTCSessionEvent } from 'jssip/lib/UA';
-// import { Media } from '@api/media.ts';
+import { ErrConnection, Signaling } from '@api/signaling.ts';
+import { Media } from '@api/media.ts';
+import type { Config, SdkResult, User } from '@api/types/types.ts';
+import type { CallDelegate } from '@api/types/call.ts';
+import type { StatusDelegate, AgentStatusResult, SetAgentStatusOptions } from '@api/types/status.ts';
+import { CallHandler } from '@api/call/call-handler.ts';
+import { StatusManager } from '@api/status-manager.ts';
+
+export class VoiceSDK {
+  private readonly _signaling: Signaling;
+  private readonly _media: Media;
+  private readonly _callHandler: CallHandler;
+  private _statusManager: StatusManager;
+
+  private constructor(cfg: Config) {
+    this._media = new Media();
+    this._signaling = new Signaling(cfg);
+    this._callHandler = new CallHandler(this._media, cfg.appName, this._signaling);
+    this._statusManager = new StatusManager(cfg);
+
+    if (cfg.delegate) {
+      this._callHandler.setDelegate(cfg.delegate);
+
+      if (cfg.delegate.statusChanged) {
+        this.setStatusDelegate(cfg.delegate);
+      }
+    }
+  }
+
+  private static _instance: VoiceSDK;
+  public static async init(cfg: Config, cb?: (instance: VoiceSDK) => void) {
+    console.log('VoiceSDK.init called with config:', { ...cfg, delegate: 'Delegate object' });
+
+    if (VoiceSDK._instance) {
+      console.log('VoiceSDK instance already exists, updating configuration');
+
+      if (cfg.delegate) {
+        if (cfg.delegate.callCreated || cfg.delegate.callConnected || cfg.delegate.callTerminated) {
+          VoiceSDK._instance._callHandler.setDelegate(cfg.delegate);
+        }
+
+        if (cfg.delegate.statusChanged) {
+          VoiceSDK._instance.setStatusDelegate(cfg.delegate);
+        }
+      }
+
+      if (cb) {
+        await Promise.resolve().then(() => cb(VoiceSDK._instance));
+      }
+
+      return;
+    }
+
+    console.log('Creating new VoiceSDK instance');
+    const instance = new VoiceSDK(cfg);
+    await instance._media.requestLocal(cfg.deviceId);
+
+    VoiceSDK._instance = instance;
+    if (cb) {
+      await Promise.resolve().then(() => cb(instance));
+    }
+  }
+
+  public async login(user: User): Promise<SdkResult> {
+    const connected = await this._signaling.connect();
+    if (!connected) {
+      return { success: false, error: ErrConnection.message };
+    }
+
+    const loginSuccess = await this._signaling.login(user);
+    if (loginSuccess) {
+      this._statusManager.connect();
+      console.log('Status manager connected after successful login');
+    }
+
+    return { success: loginSuccess };
+  }
+
+  public async makeCall(target: string): Promise<SdkResult> {
+    try {
+      if (!this._signaling.isReady()) {
+        throw ErrConnection;
+      }
+
+      await this._callHandler.makeCall(target);
+      return { success: true };
+    } catch (error) {
+      console.error('Error making call:', error);
+      return {
+        success: false,
+        error: error instanceof Error ? error.message : String(error),
+      };
+    }
+  }
+
+  public async endCall(): Promise<SdkResult> {
+    try {
+      const result = await this._callHandler.endCurrentCall();
+      return { success: result };
+    } catch (error: any) {
+      return { success: false, error: error.message };
+    }
+  }
+
+  public resetCallState(): void {
+    this._callHandler.resetState();
+  }
+
+  public setCallDelegate(delegate: CallDelegate): void {
+    this._callHandler.setDelegate(delegate);
+  }
+
+  public setStatusDelegate(delegate: StatusDelegate): void {
+    const currentConfig = this._statusManager['_config'];
+    const updatedConfig = {
+      ...currentConfig,
+      delegate: {
+        ...currentConfig.delegate,
+        onStatus: delegate.statusChanged,
+      },
+    };
+
+    this._statusManager = new StatusManager(updatedConfig);
+
+    const currentStatus = this._statusManager.currentStatus;
+    if (currentStatus && delegate.statusChanged) {
+      delegate.statusChanged(currentStatus.status, currentStatus.reason);
+      console.log('Initial status notification sent to delegate:', currentStatus);
+    }
+
+    this._statusManager.connect();
+  }
+
+  public async setAgentStatus(options: SetAgentStatusOptions): Promise<SdkResult> {
+    try {
+      const success = await this._statusManager.changeStatus(options.status, options.reason);
+      return { success };
+    } catch (error: any) {
+      return { success: false, error: error.message };
+    }
+  }
+
+  public getAgentStatus(): AgentStatusResult {
+    try {
+      const currentStatus = this._statusManager.currentStatus;
+      return {
+        success: true,
+        status: currentStatus.status,
+        reason: currentStatus.reason,
+      };
+    } catch (error: any) {
+      return { success: false, error: error.message };
+    }
+  }
+
+  public async changeStatus(status: string, reason?: string): Promise<SdkResult> {
+    return this.setAgentStatus({ status, reason });
+  }
+
+  public getCurrentStatus(): string {
+    return this._statusManager.currentStatus.status;
+  }
+
+  public getBrowserId(): string | undefined {
+    return this._statusManager.browserId;
+  }
+
+  public dispose(): void {
+    this._statusManager.dispose();
+
+    if (this._signaling) {
+      console.log('Note: Signaling connection might still be active');
+    }
+
+    if (this._callHandler) {
+      this._callHandler.resetState();
+    }
+
+    console.log('VoiceSDK resources disposed');
+  }
+}
+
+export default VoiceSDK;
+
+if (window.VoiceSDK === undefined || !window.VoiceSDK) {
+  window.VoiceSDK = VoiceSDK;
+}
+
+// Xóa phần code test bên dưới để tránh gây nhầm lẫn
+// let count = 0;
 //
-// const DID_HEADER = 'X-DID';
-// const DIRECTION_HEADER = 'X-DIR';
+// VoiceSDK.init(
+//   {
+//     // debug: true,
+//     gateways: ['ws://101.99.20.58:7080'],
+//     appName: 'voiceuat.metechvn.com',
+//     appId: '',
+//     secretKey: '',
+//     el: '',
+//     delegate: {
+//       callCreated: (actors, params) => {
+//         console.log('callCreated', actors, params);
 //
-// export default class VoiceSDK {
-//   private static _instance: VoiceSDK;
-//
-//   private readonly _config: Config;
-//
-//   private readonly _uaGateways: string[];
-//   private readonly _nssGateway?: URL;
-//   private _ua?: UA;
-//
-//   private readonly _timeout = 10000;
-//
-//   private _dialog?: Dialog;
-//   private _localMedia?: MediaStream;
-//   // private _socketClient?: SocketClient;
-//
-//   get isConnected(): boolean {
-//     return !!this._ua?.isConnected();
-//   }
-//
-//   get isRegistered(): boolean {
-//     return !!this._ua?.isRegistered();
-//   }
-//
-//   private readonly _media: Media;
-//
-//   private constructor(cfg: Config) {
-//     this._config = cfg;
-//     this._media = new Media();
-//
-//     const { baseUrl, gateways } = cfg || {};
-//
-//     if (!baseUrl) {
-//       this._config.baseUrl = 'https://connect.omicx.vn';
-//     }
-//
-//     if (cfg.debug) debug.enable('JsSIP:*');
-//
-//     this._uaGateways = gateways.filter(g => g.startsWith('wss://') || g.startsWith('ws://')) ?? [];
-//     if (!this._uaGateways.length) {
-//       throw new Error('Missing required gateways');
-//     }
-//
-//     if (cfg.nssUrl?.length) {
-//       this._nssGateway = URL.parse(cfg.nssUrl) ?? URL.parse(cfg.nssUrl, this._config.baseUrl) ?? undefined;
-//
-//       if (this._nssGateway) {
-//         if (cfg.debug) debug.log(`VoiceSDK: Using NSS Gateway: ${this._nssGateway.href}`);
-//         // const socket = new SocketClient(this._nssGateway);
-//         // console.log(socket);
-//       }
-//     }
-//   }
-//
-//   public static async init(cfg: Config, cb?: (instance: VoiceSDK) => void) {
-//     if (VoiceSDK._instance) return;
-//
-//     const instance = new VoiceSDK(cfg);
-//     instance._localMedia = await instance._media.requestLocal(cfg.deviceId);
-//
-//     VoiceSDK._instance = instance;
-//     if (cb) {
-//       await Promise.resolve().then(() => cb(instance));
-//     }
-//   }
-//
-//   private async _connect(user: User, opts?: ConnectOptions): Promise<boolean> {
-//     if (!this._config) {
-//       throw new Error('Missing required configuration');
-//     }
-//     if (this.isConnected) return this.isConnected;
-//
-//     this._config.delegate = this._config.delegate || {};
-//     if (opts?.delegate?.onConnect) {
-//       this._config.delegate.onConnect = opts.delegate.onConnect;
-//     }
-//     if (opts?.delegate?.onDisconnect) {
-//       this._config.delegate.onDisconnect = opts.delegate.onDisconnect;
-//     }
-//
-//     this._ua = await this._setup(user);
-//     if (!this._ua) {
-//       throw new Error(`Failed to setup VoiceSDK`);
-//     }
-//
-//     if (this._nssGateway) {
-//       // this._socketClient = new SocketClient(this._nssGateway, user.extension, this._config.appName, this._broadcastor);
-//       // this._socketClient.setup();
-//     }
-//
-//     return this.isConnected;
-//   }
-//
-//   public async login(user: User): Promise<SdkResult> {
-//     const connected = await this._connect(user);
-//     if (!connected) {
-//       return {
-//         success: false,
-//         error: `Failed to connect to gateway(s): ${this._uaGateways.join(', ')}`,
-//       };
-//     }
-//
-//     return new Promise<SdkResult>(resolve => {
-//       const timeout = setTimeout(() => {
-//         resolve({ success: false, error: `Registration timeout after ${this._timeout}ms` });
-//       }, this._timeout);
-//
-//       this._ua?.on('registered', () => {
-//         clearTimeout(timeout);
-//         resolve({ success: true });
-//       });
-//
-//       this._ua?.on('registrationFailed', e => {
-//         resolve({
-//           success: false,
-//           error: `Registration failed: ${e.cause}`,
-//         });
-//       });
-//
-//       this._ua?.register();
-//     });
-//   }
-//
-//   public disconnect() {
-//     if (!this._ua || !this.isConnected) return;
-//
-//     if (this._dialog?.session) {
-//       this._dialog.session.terminate();
-//       delete this._dialog;
-//     }
-//
-//     this._ua.unregister();
-//     this._ua.stop();
-//   }
-//
-//   public async makeCall(dest: string, opts?: CallOptions): Promise<SdkResult> {
-//     const result = { success: false } as SdkResult;
-//
-//     if (!dest?.length) {
-//       result.error = 'Invalid destination';
-//       return result;
-//     }
-//
-//     if (this._dialog && !this._dialog.isTerminated()) {
-//       result.error = 'Call already in progress';
-//       return result;
-//     }
-//
-//     if (!this._ua || !this.isConnected || !this.isRegistered) {
-//       result.error = 'SDK not ready for make call';
-//       return result;
-//     }
-//
-//     const targetUri = new URI('sip', dest, this._config.appName);
-//
-//     const extraHeaders: string[] = [];
-//     if (opts?.did?.length) extraHeaders.push(`${DID_HEADER}: ${opts.did}`);
-//
-//     if (opts?.extraVariables) {
-//       Object.entries(opts.extraVariables).forEach(([key, value]) => {
-//         if (!key?.length || !value?.length) return;
-//
-//         const header = `X-${key}: ${value}`;
-//         if (header.length > 50) {
-//           console.warn(`Header ${key} is too long, max length is 50 characters`);
+//         if (count % 2 === 0) {
+//           setTimeout(() => {
+//             actors.answerer();
+//           }, 3000);
+//         } else {
+//           actors.terminator();
 //         }
 //
-//         extraHeaders.push(header);
-//       });
-//     }
-//
-//     const callOpts: any = {
-//       extraHeaders,
-//       sessionTimersExpires: 120,
-//       rtcOfferConstraints: {
-//         offerToReceiveAudio: true,
-//         offerToReceiveVideo: false,
+//         count++;
 //       },
-//     };
-//     if (this._localMedia) {
-//       callOpts.mediaStream = this._localMedia;
-//     } else {
-//       callOpts.mediaConstraints = {
-//         audio: this._config.deviceId?.length ? { deviceId: this._config.deviceId } : true,
-//         video: false,
-//       };
-//     }
-//
-//     if (this._config.iceServers?.length) {
-//       callOpts.pcConfig = { iceServers: this._config.iceServers };
-//     }
-//
-//     const globalCallId = Utils.newUUID();
-//     this._ua.prependOnceListener('newRTCSession', e => {
-//       const { request, originator } = e;
-//
-//       const sipInbound = originator === 'remote';
-//       if (!sipInbound) (request as any).setHeader('call-id', globalCallId);
-//
-//       this._onSession(e, opts);
-//     });
-//
-//     this._ua.call(targetUri.toString(), {
-//       ...callOpts,
-//       pcConfig: {
-//         iceServers: this._config.iceServers ?? [],
+//       callConnected: () => {
+//         console.log('callConnected');
 //       },
-//     });
-//
-//     result.success = true;
-//     result.data = { id: globalCallId, actions: this._dialog?.actions };
-//
-//     return result;
-//   }
-//
-//   public hangup(cause?: string) {
-//     if (!this._dialog?.session) return;
-//
-//     this._dialog.session.terminate({ cause });
-//     delete this._dialog;
-//   }
-//
-//   public mute() {
-//     if (!this._dialog?.session) return;
-//
-//     const { audio } = this._dialog.session.isMuted();
-//     if (!audio) {
-//       return this._dialog?.session.mute();
-//     }
-//   }
-//
-//   public unmute() {
-//     if (!this._dialog?.session) return;
-//
-//     const { audio } = this._dialog.session.isMuted();
-//     if (audio) {
-//       return this._dialog?.session.unmute();
-//     }
-//   }
-//
-//   public hold() {
-//     if (!this._dialog?.session) return;
-//
-//     const { local } = this._dialog.session.isOnHold();
-//     if (!local) {
-//       return this._dialog?.session.hold();
-//     }
-//   }
-//
-//   public unhold() {
-//     if (!this._dialog?.session) return;
-//
-//     const { local } = this._dialog.session.isOnHold();
-//     if (local) {
-//       return this._dialog?.session.unhold();
-//     }
-//   }
-//
-//   private async _setup(user: User): Promise<UA> {
-//     const uriStr = new URI('sip', user.extension, this._config.appName, undefined, { transport: 'ws' }).toString();
-//     const ua = new UA({
-//       sockets: this._uaGateways.map(g => new WebSocketInterface(g)),
-//       uri: uriStr,
-//       contact_uri: uriStr,
-//       display_name: user.username,
-//       password: user.password,
-//       user_agent: 'Voice-SDK',
-//       register: false,
-//       register_expires: this._timeout / 1000,
-//     });
-//
-//     return new Promise((resolve, reject) => {
-//       let timeout: number;
-//
-//       const onConnect = this._config.delegate?.onConnect;
-//       const onDisconnect = this._config.delegate?.onDisconnect;
-//
-//       // eslint-disable-next-line
-//       // @ts-expect-error
-//       ua.on('newTransaction', ({ transaction }) => {
-//         const request = transaction.request || { method: '', cseq: 0 };
-//         const { method, cseq } = request;
-//         if (!method?.length || !cseq) return;
-//
-//         if (method === 'REGISTER' && cseq === 1) {
-//           (request as any)?.setHeader('call-id', Utils.newUUID());
-//         }
+//     },
+//   },
+//   async cb => {
+//     try {
+//       await cb.login({
+//         extension: '10000',
+//         password: 'Abcd@54321',
 //       });
-//
-//       ua.on('connecting', () => {
-//         timeout = setTimeout(() => {
-//           reject(new Error('Connection timeout'));
-//         }, this._timeout);
-//       });
-//
-//       ua.on('connected', () => {
-//         Promise.resolve()
-//           .then(() => clearTimeout(timeout))
-//           .then(onConnect)
-//           .catch(console.error);
-//
-//         Promise.resolve()
-//           .then(() => ua.on('newRTCSession', this._onSession.bind(this)))
-//           .catch(console.error);
-//         resolve(ua);
-//       });
-//
-//       ua.on('disconnected', ({ error, code, reason }) => {
-//         Promise.resolve()
-//           .then(() => clearTimeout(timeout))
-//           .then(() => onDisconnect?.(error, code, reason))
-//           .catch(console.error);
-//       });
-//
-//       ua.start();
-//     });
-//   }
-//
-//   private _onSession(e: IncomingRTCSessionEvent | OutgoingRTCSessionEvent, opts?: CallOptions) {
-//     const { session, request, originator } = e || {};
-//     if (!session || !originator?.length) {
-//       console.error('UA[_onSession]: Invalid session', e);
-//       return;
+//       cb.makeCall('20000');
+//     } catch (e: any) {
+//       console.error(e);
 //     }
-//
-//     const sipInbound = originator === 'remote';
-//     const directionHeader = request?.getHeader(DIRECTION_HEADER);
-//     const inbound = sipInbound && 'outbound' !== directionHeader;
-//     const callId = request?.getHeader('call-id') || Utils.newUUID();
-//     const caller = request?.from?.uri?.user ?? 'Unknown';
-//     const callee = request?.to?.uri?.user ?? 'Unknown';
-//
-//     if (sipInbound) {
-//       if (this._dialog && !this._dialog.isTerminated()) {
-//         console.warn(`UA[_onSession]: Call already in progress: ${this._dialog.id}`);
-//         return this._dialog?.session?.terminate({
-//           status_code: 486,
-//           cause: C.causes.BUSY,
-//           reason_phrase: 'CALL_IN_PROGRESS',
-//         });
-//       }
-//     }
-//
-//     if (!this._dialog || this._dialog.isTerminated()) {
-//       const finalDelegate = {
-//         rtc: opts?.delegate?.rtc ?? this._config.delegate?.rtc,
-//         callCreated: opts?.delegate?.callCreated ?? this._config.delegate?.callCreated,
-//         callConnected: opts?.delegate?.callConnected ?? this._config.delegate?.callConnected,
-//         callTerminated: opts?.delegate?.callTerminated ?? this._config.delegate?.callTerminated,
-//       } as CallDelegate;
-//
-//       this._dialog = new Dialog(session, sipInbound, {
-//         domain: this._config.appName,
-//         deviceId: this._config.deviceId,
-//         localMedia: this._localMedia,
-//         delegate: finalDelegate,
-//       });
-//       this._dialog.id = callId;
-//       if (finalDelegate?.rtc) {
-//         Object.entries(finalDelegate?.rtc).forEach(([event, handler]) => session.addListener(event, handler));
-//       }
-//
-//       finalDelegate?.callCreated?.(this._dialog.actions, { id: callId, inbound, caller, callee });
-//
-//       session.on('accepted', this.onSessionAccepted.bind(this));
-//       session.on('confirmed', this.onSessionConfirmed.bind(this));
-//       session.on('failed', this.onSessionEnded.bind(this));
-//       session.on('ended', this.onSessionEnded.bind(this));
-//       session.on('progress', this.onSessionProgress.bind(this));
-//     }
-//   }
-//
-//   // eslint-disable-next-line @typescript-eslint/no-unused-vars
-//   private async onSessionAccepted(_event: IncomingEvent | OutgoingEvent) {
-//     if (!this._dialog) return;
-//
-//     if ('CREATED' === this._dialog.status) {
-//       this._dialog.status = 'CONNECTED';
-//       Promise.resolve().then(() => this._dialog?.delegate?.callConnected?.());
-//
-//       const audio = new Audio();
-//       audio.srcObject = this._dialog.remoteStream();
-//       audio.play().catch(console.error);
-//     }
-//   }
-//
-//   // eslint-disable-next-line @typescript-eslint/no-unused-vars
-//   private async onSessionProgress(_event: IncomingEvent | OutgoingEvent) {
-//     // call.status = CallStatus.S_RINGING;
-//
-//     if (!this._dialog) return;
-//   }
-//
-//   // eslint-disable-next-line @typescript-eslint/no-unused-vars
-//   private async onSessionConfirmed(_event: IncomingAckEvent | OutgoingAckEvent) {
-//     if (!this._dialog) return;
-//
-//     if ('CREATED' === this._dialog.status) {
-//       this._dialog.status = 'CONNECTED';
-//       Promise.resolve().then(() => this._dialog?.delegate?.callConnected?.());
-//     }
-//   }
-//
-//   private async onSessionEnded(event: EndEvent) {
-//     if (!this._dialog || this._dialog.isTerminated()) {
-//       return;
-//     }
-//
-//     const code = parseInt((event.message as any)?.['status_code'] ?? 200);
-//     let cause = undefined;
-//     if (code >= 200 && code <= 399) cause = 'OK';
-//     else cause = 'SIP Failure Code' === event.cause ? (event.message as any)?.['reason_phrase'] : event.cause;
-//
-//     this._dialog.status = 'TERMINATED';
-//     Promise.resolve()
-//       .then(() => this._dialog?.delegate?.callTerminated?.(code, cause))
-//       .then(() => delete this._dialog)
-//       .catch(console.error);
-//   }
-// }
-//
-// if (window.VoiceSDK === undefined || !window.VoiceSDK) {
-//   window.VoiceSDK = VoiceSDK;
-// }
+//   },
+// ).catch(console.error);
