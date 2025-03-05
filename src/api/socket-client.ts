@@ -1,5 +1,4 @@
 import { io, type ManagerOptions, Socket, type SocketOptions } from 'socket.io-client';
-import type { State } from '@api/broadcaster.ts';
 import { StatusEvent } from '@api/types/status.ts';
 import { v7 as uuidv7 } from 'uuid';
 
@@ -8,8 +7,6 @@ export class SocketClient {
   private readonly _url: URL;
   private readonly _opts: Partial<ManagerOptions & SocketOptions>;
   private readonly _browserId: string;
-
-  private readonly _stateBroadcast: { broadcast: (state: State) => void };
 
   private _connecting = false;
   private _connected = false;
@@ -31,13 +28,7 @@ export class SocketClient {
     return this._browserId;
   }
 
-  constructor(
-    nssUrl: URL,
-    extension: string,
-    appName: string,
-    stateBroadcast: { broadcast: (state: State) => void },
-    browserId?: string,
-  ) {
+  constructor(nssUrl: URL, extension: string, appName: string, browserId?: string) {
     this._url = nssUrl;
 
     // Luôn tạo hoặc lấy browserId từ localStorage, không cho phép truyền từ bên ngoài
@@ -67,8 +58,6 @@ export class SocketClient {
         browserId: browserId,
       },
     };
-
-    this._stateBroadcast = stateBroadcast;
   }
 
   public setup(): void {
@@ -103,26 +92,8 @@ export class SocketClient {
       console.error('Socket connection error:', error);
     });
 
-    this._socket.on('change-status', (data: any, metadata: any, ack: (d: any) => void) => {
-      console.log('Status change received:', { data, metadata });
-
-      this._stateBroadcast.broadcast({
-        key: 'change-status',
-        value: { ...data },
-        version: metadata.seq || Date.now(),
-      });
-
-      ack({ success: true });
-    });
-
     this._socket.on(StatusEvent.STATUS_CHANGED, (data: any, metadata: any, ack: (d: any) => void) => {
       console.log('Status changed event received:', { data, metadata });
-
-      this._stateBroadcast.broadcast({
-        key: StatusEvent.STATUS_CHANGED,
-        value: data,
-        version: data.timestamp || Date.now(),
-      });
 
       if (ack && typeof ack === 'function') {
         ack({ success: true });

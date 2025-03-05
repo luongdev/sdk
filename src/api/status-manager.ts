@@ -2,14 +2,12 @@ import type { Status, StatusDelegate } from '@api/types/status.ts';
 import { StatusEvent } from '@api/types/status.ts';
 import type { Config } from '@api/types/types.ts';
 import { SocketClient } from '@api/socket-client.ts';
-import { Broadcaster } from '@api/broadcaster.ts';
 import { LocalBroadcaster } from '@api/local-broadcaster.ts';
 import type { StatusMessage } from '@api/local-broadcaster.ts';
 import { v7 as uuidv7 } from 'uuid';
 
 export class StatusManager {
   private readonly _socketClient?: SocketClient;
-  private readonly _broadcaster: Broadcaster;
   private readonly _localBroadcaster: LocalBroadcaster;
   private readonly _delegate?: StatusDelegate;
   private readonly _config: Config;
@@ -22,16 +20,13 @@ export class StatusManager {
   constructor(config: Config) {
     this._config = config;
     this._delegate = config.delegate;
-    this._broadcaster = new Broadcaster();
     this._localBroadcaster = new LocalBroadcaster();
 
     this._setupLocalBroadcaster();
 
     if (config.nssUrl) {
       const nssUrl = new URL(config.nssUrl);
-      this._socketClient = new SocketClient(nssUrl, config.appId, config.appName, this._broadcaster);
-
-      this._setupBroadcaster();
+      this._socketClient = new SocketClient(nssUrl, config.appId, config.appName);
     }
   }
 
@@ -58,42 +53,6 @@ export class StatusManager {
         this._delegate?.onStatus?.(message.status, message.reason);
       },
     );
-  }
-
-  private _setupBroadcaster() {
-    this._broadcaster.addStateListener(state => {
-      if (state.key === StatusEvent.STATUS_CHANGED) {
-        const statusData = state.value as Status;
-        console.log('Received status change from server:', statusData);
-
-        const newTimestamp = statusData.timestamp || Date.now();
-
-        if (
-          this._pendingStatusChange &&
-          this._pendingStatusChange.status === statusData.status &&
-          this._pendingStatusChange.reason === statusData.reason
-        ) {
-          console.log('Received status change confirmation from server, skipping duplicate notification');
-
-          this._lastStatusTimestamp = newTimestamp;
-          this._currentStatus = statusData;
-          this._localBroadcaster.broadcastStatusChange(statusData.status, statusData.reason);
-          this._pendingStatusChange = null;
-        } else {
-          if (newTimestamp <= this._lastStatusTimestamp) {
-            console.log(
-              `Ignoring outdated status message from server (timestamp ${newTimestamp} <= ${this._lastStatusTimestamp})`,
-            );
-            return;
-          }
-
-          this._lastStatusTimestamp = newTimestamp;
-          this._currentStatus = statusData;
-          this._delegate?.onStatus?.(statusData.status, statusData.reason);
-          this._localBroadcaster.broadcastStatusChange(statusData.status, statusData.reason);
-        }
-      }
-    });
   }
 
   public connect(): void {
