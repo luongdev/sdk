@@ -64,8 +64,9 @@ export class StatusManager {
     this._broadcaster.addStateListener(state => {
       if (state.key === StatusEvent.STATUS_CHANGED) {
         const statusData = state.value as Status;
+        console.log('Received status change from server:', statusData);
 
-        const newTimestamp = Date.now();
+        const newTimestamp = statusData.timestamp || Date.now();
 
         if (
           this._pendingStatusChange &&
@@ -75,11 +76,8 @@ export class StatusManager {
           console.log('Received status change confirmation from server, skipping duplicate notification');
 
           this._lastStatusTimestamp = newTimestamp;
-
           this._currentStatus = statusData;
-
           this._localBroadcaster.broadcastStatusChange(statusData.status, statusData.reason);
-
           this._pendingStatusChange = null;
         } else {
           if (newTimestamp <= this._lastStatusTimestamp) {
@@ -90,11 +88,8 @@ export class StatusManager {
           }
 
           this._lastStatusTimestamp = newTimestamp;
-
           this._currentStatus = statusData;
-
           this._delegate?.onStatus?.(statusData.status, statusData.reason);
-
           this._localBroadcaster.broadcastStatusChange(statusData.status, statusData.reason);
         }
       }

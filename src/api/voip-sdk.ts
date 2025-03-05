@@ -20,6 +20,10 @@ export class VoipSDK {
 
     if (cfg.delegate) {
       this._callHandler.setDelegate(cfg.delegate);
+
+      if (cfg.delegate.onStatus) {
+        this.setStatusDelegate(cfg.delegate);
+      }
     }
   }
 
@@ -45,6 +49,7 @@ export class VoipSDK {
     const loginSuccess = await this._signaling.login(user);
     if (loginSuccess) {
       this._statusManager.connect();
+      console.log('Status manager connected after successful login');
     }
 
     return { success: loginSuccess };
@@ -95,6 +100,14 @@ export class VoipSDK {
     };
 
     this._statusManager = new StatusManager(updatedConfig);
+
+    const currentStatus = this._statusManager.currentStatus;
+    if (currentStatus && delegate.onStatus) {
+      delegate.onStatus(currentStatus.status, currentStatus.reason);
+      console.log('Initial status notification sent to delegate:', currentStatus);
+    }
+
+    this._statusManager.connect();
   }
 
   public async setAgentStatus(options: SetAgentStatusOptions): Promise<SdkResult> {

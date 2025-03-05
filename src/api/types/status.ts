@@ -7,6 +7,7 @@ export interface StatusDelegate {
 export interface Status {
   status: string;
   reason?: string;
+  timestamp?: number;
 }
 
 export interface AgentStatusResult {

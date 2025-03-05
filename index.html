@@ -1,5 +1,5 @@
 <!doctype html>
-<html lang="en">
+<html lang="vi">
 <head>
     <meta charset="UTF-8"/>
     <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
@@ -18,45 +18,49 @@
             border: 1px solid #ddd;
             border-radius: 5px;
         }
-        .status-item {
+        .status-display {
+            font-size: 24px;
+            font-weight: bold;
             margin-bottom: 10px;
-            padding: 10px;
-            border-radius: 4px;
-            cursor: pointer;
         }
-        .status-item:hover {
-            background-color: #f5f5f5;
+        .available {
+            color: green;
         }
-        .status-item.active {
-            background-color: #e6f7ff;
-            border-left: 3px solid #1890ff;
+        .busy {
+            color: red;
         }
-        .current-status {
+        .away, .break {
+            color: orange;
+        }
+        .offline {
+            color: gray;
+        }
+        .info-row {
+            margin-bottom: 5px;
+        }
+        form {
             margin-top: 20px;
-            padding: 10px;
-            background-color: #f0f0f0;
+        }
+        select, input, button {
+            padding: 8px;
+            margin-right: 10px;
             border-radius: 4px;
+            border: 1px solid #ccc;
         }
         button {
-            padding: 8px 16px;
             background-color: #1890ff;
             color: white;
             border: none;
-            border-radius: 4px;
             cursor: pointer;
-            margin-top: 10px;
         }
         button:hover {
             background-color: #40a9ff;
         }
         .login-container {
             margin-bottom: 20px;
-        }
-        input {
-            padding: 8px;
-            margin-right: 10px;
+            padding: 15px;
             border: 1px solid #ddd;
-            border-radius: 4px;
+            border-radius: 5px;
         }
     </style>
 </head>
@@ -65,48 +69,207 @@
     
     <div class="login-container">
         <h2>Đăng nhập</h2>
-        <input type="text" id="agentId" placeholder="Agent ID" value="10000">
-        <button id="loginBtn">Đăng nhập</button>
+        <form id="login-form">
+            <input type="text" id="extension-input" placeholder="Số máy nhánh" value="10000">
+            <input type="password" id="password-input" placeholder="Mật khẩu" value="Abcd@54321">
+            <button type="submit">Đăng nhập</button>
+        </form>
+        <div id="login-status" style="margin-top: 10px;"></div>
     </div>
 
-    <div id="statusSection" style="display: none;">
-        <h2>Thay đổi trạng thái</h2>
-        
-        <div class="current-status">
-            <h3>Trạng thái hiện tại:</h3>
-            <div id="currentStatus">Chưa đăng nhập</div>
+    <div id="status-section" style="display: none;">
+        <div class="status-container">
+            <h2>Trạng thái hiện tại</h2>
+            <div id="status-display" class="status-display">Đang kết nối...</div>
+            <div class="info-row">Lý do: <span id="reason-display">Chưa có thông tin</span></div>
+            <div class="info-row">Thời gian cập nhật: <span id="timestamp-display">-</span></div>
         </div>
         
         <div class="status-container">
-            <div class="status-item" data-status="AVAILABLE">
-                <h3>Sẵn sàng</h3>
-                <p>Có thể nhận cuộc gọi</p>
-            </div>
-            
-            <div class="status-item" data-status="BUSY">
-                <h3>Bận</h3>
-                <p>Không thể nhận cuộc gọi mới</p>
-            </div>
-            
-            <div class="status-item" data-status="OFFLINE">
-                <h3>Ngoại tuyến</h3>
-                <p>Không hoạt động</p>
-            </div>
-            
-            <div class="status-item" data-status="BREAK">
-                <h3>Giải lao</h3>
-                <p>Tạm thời không làm việc</p>
-            </div>
+            <h2>Thay đổi trạng thái</h2>
+            <form id="status-form">
+                <select id="status-select">
+                    <option value="AVAILABLE">Sẵn sàng</option>
+                    <option value="BUSY">Bận</option>
+                    <option value="AWAY">Vắng mặt</option>
+                    <option value="BREAK">Giải lao</option>
+                    <option value="OFFLINE">Ngoại tuyến</option>
+                </select>
+                
+                <input type="text" id="reason-input" placeholder="Lý do (tùy chọn)">
+                
+                <button type="submit">Cập nhật trạng thái</button>
+            </form>
         </div>
     </div>
+    
+    <div id="app"></div>
 
-    <script type="module" src="/src/examples/status-example.ts"></script>
-    <script>
-        // Debug DOM
-        document.addEventListener('DOMContentLoaded', function() {
-            console.log('DOM loaded in index.html');
-            console.log('Status section exists:', !!document.getElementById('statusSection'));
-            console.log('Status items:', document.querySelectorAll('.status-item').length);
+    <script type="module">
+        import { VoipSDK } from '/src/api/voip-sdk.ts';
+
+        const statusDisplay = document.getElementById('status-display');
+        const reasonDisplay = document.getElementById('reason-display');
+        const timestampDisplay = document.getElementById('timestamp-display');
+        const statusForm = document.getElementById('status-form');
+        const statusSelect = document.getElementById('status-select');
+        const reasonInput = document.getElementById('reason-input');
+        const loginForm = document.getElementById('login-form');
+        const extensionInput = document.getElementById('extension-input');
+        const passwordInput = document.getElementById('password-input');
+        const loginStatus = document.getElementById('login-status');
+        const statusSection = document.getElementById('status-section');
+
+        let sdk;
+
+        function updateStatusDisplay(status, reason, timestamp) {
+            if (statusDisplay) {
+                statusDisplay.textContent = status;
+                statusDisplay.className = 'status-display ' + status.toLowerCase();
+            }
+            
+            if (reasonDisplay) {
+                reasonDisplay.textContent = reason || 'Không có lý do';
+            }
+            
+            if (timestampDisplay && timestamp) {
+                const date = new Date(timestamp);
+                timestampDisplay.textContent = date.toLocaleString('vi-VN');
+            } else if (timestampDisplay) {
+                timestampDisplay.textContent = new Date().toLocaleString('vi-VN');
+            }
+        }
+
+        async function initSDK() {
+            await VoipSDK.init({
+                el: 'app',
+                appName: 'voiceuat.metechvn.com',
+                appId: '10000',
+                secretKey: 'your-secret-key',
+                nssUrl: 'http://0.0.0.0:3000/ws',
+                gateways: ['ws://101.99.20.58:7080'],
+                delegate: {
+                    onStatus: (status, reason, timestamp) => {
+                        console.log(`Trạng thái thay đổi: ${status}, Lý do: ${reason || 'Không có'}, Thời gian: ${timestamp || Date.now()}`);
+                        updateStatusDisplay(status, reason, timestamp);
+                    }
+                }
+            });
+        }
+
+        // Khởi tạo SDK khi trang được tải
+        document.addEventListener('DOMContentLoaded', initSDK);
+
+        // Xử lý đăng nhập
+        if (loginForm) {
+            loginForm.addEventListener('submit', async (e) => {
+                e.preventDefault();
+                
+                const extension = extensionInput.value;
+                const password = passwordInput.value;
+                
+                if (!extension || !password) {
+                    loginStatus.textContent = 'Vui lòng nhập đầy đủ thông tin';
+                    loginStatus.style.color = 'red';
+                    return;
+                }
+                
+                loginStatus.textContent = 'Đang đăng nhập...';
+                loginStatus.style.color = 'blue';
+                
+                try {
+                    await VoipSDK.init({
+                        el: 'app',
+                        appName: 'voiceuat.metechvn.com',
+                        appId: extension,
+                        secretKey: 'your-secret-key',
+                        nssUrl: 'http://0.0.0.0:3000',
+                        gateways: ['ws://101.99.20.58:7080'],
+                        delegate: {
+                            onStatus: (status, reason, timestamp) => {
+                                console.log(`Trạng thái thay đổi: ${status}, Lý do: ${reason || 'Không có'}, Thời gian: ${timestamp || Date.now()}`);
+                                updateStatusDisplay(status, reason, timestamp);
+                            }
+                        }
+                    }, async (instance) => {
+                        sdk = instance;
+                        
+                        try {
+                            const loginResult = await sdk.login({
+                                extension: extension,
+                                password: password
+                            });
+                            
+                            if (loginResult.success) {
+                                loginStatus.textContent = 'Đăng nhập thành công';
+                                loginStatus.style.color = 'green';
+                                
+                                // Hiển thị phần trạng thái
+                                if (statusSection) {
+                                    statusSection.style.display = 'block';
+                                }
+                                
+                                const currentStatus = sdk.getAgentStatus();
+                                if (currentStatus.success) {
+                                    const status = currentStatus.status || 'OFFLINE';
+                                    updateStatusDisplay(status, currentStatus.reason);
+                                    console.log('Trạng thái hiện tại:', status);
+                                }
+                            } else {
+                                loginStatus.textContent = 'Đăng nhập thất bại: ' + (loginResult.error || 'Lỗi không xác định');
+                                loginStatus.style.color = 'red';
+                            }
+                        } catch (error) {
+                            loginStatus.textContent = 'Lỗi đăng nhập: ' + error.message;
+                            loginStatus.style.color = 'red';
+                            console.error('Lỗi đăng nhập:', error);
+                        }
+                    });
+                } catch (error) {
+                    loginStatus.textContent = 'Lỗi khởi tạo SDK: ' + error.message;
+                    loginStatus.style.color = 'red';
+                    console.error('Lỗi khởi tạo SDK:', error);
+                }
+            });
+        }
+
+        // Xử lý thay đổi trạng thái
+        if (statusForm) {
+            statusForm.addEventListener('submit', async (e) => {
+                e.preventDefault();
+                
+                if (!sdk) {
+                    console.error('SDK chưa được khởi tạo');
+                    return;
+                }
+                
+                const status = statusSelect.value;
+                const reason = reasonInput.value;
+                
+                console.log(`Đang thay đổi trạng thái thành: ${status}, Lý do: ${reason || 'Không có'}`);
+                
+                try {
+                    const result = await sdk.setAgentStatus({
+                        status,
+                        reason: reason || undefined
+                    });
+                    
+                    if (result.success) {
+                        console.log(`Đã thay đổi trạng thái thành ${status}`);
+                    } else {
+                        console.error('Không thể thay đổi trạng thái:', result.error);
+                    }
+                } catch (error) {
+                    console.error('Lỗi khi thay đổi trạng thái:', error);
+                }
+            });
+        }
+
+        // Dọn dẹp khi trang đóng
+        window.addEventListener('beforeunload', () => {
+            if (sdk) {
+                sdk.dispose();
+            }
         });
     </script>
 </body>

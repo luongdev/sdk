@@ -1,5 +1,6 @@
 import { io, type ManagerOptions, Socket, type SocketOptions } from 'socket.io-client';
 import type { State } from '@api/broadcaster.ts';
+import { StatusEvent } from '@api/types/status.ts';
 
 export class SocketClient {
   private _socket?: Socket;
@@ -52,11 +53,13 @@ export class SocketClient {
       this._connecting = false;
       this._connected = true;
       this._alive = true;
+      console.log('Socket connected successfully');
     });
 
-    this._socket.on('disconnect', _ => {
+    this._socket.on('disconnect', () => {
       this._connected = false;
       this._alive = false;
+      console.log('Socket disconnected');
     });
 
     this._socket.on('connect_error', error => {
@@ -73,6 +76,20 @@ export class SocketClient {
       });
 
       ack({ success: true });
+    });
+
+    this._socket.on(StatusEvent.STATUS_CHANGED, (data: any, metadata: any, ack: (d: any) => void) => {
+      console.log('Status changed event received:', { data, metadata });
+
+      this._stateBroadcast.broadcast({
+        key: StatusEvent.STATUS_CHANGED,
+        value: data,
+        version: data.timestamp || Date.now(),
+      });
+
+      if (ack && typeof ack === 'function') {
+        ack({ success: true });
+      }
     });
   }
 
