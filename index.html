@@ -153,6 +153,24 @@
         // Khởi tạo UI khi trang được tải
         document.addEventListener('DOMContentLoaded', initUI);
 
+        // Cấu hình SDK - tập trung cấu hình ở một nơi để tránh không nhất quán
+        function getSDKConfig(extension) {
+            return {
+                el: 'app',
+                appName: 'voiceuat.metechvn.com',
+                appId: extension,
+                secretKey: 'your-secret-key',
+                nssUrl: 'ws://0.0.0.0:3000/ws',
+                gateways: ['ws://101.99.20.58:7080'],
+                delegate: {
+                    onStatus: (status, reason, timestamp) => {
+                        console.log(`Trạng thái thay đổi: ${status}, Lý do: ${reason || 'Không có'}, Thời gian: ${timestamp || Date.now()}`);
+                        updateStatusDisplay(status, reason, timestamp);
+                    }
+                }
+            };
+        }
+
         // Xử lý đăng nhập
         if (loginForm) {
             loginForm.addEventListener('submit', async (e) => {
@@ -171,37 +189,45 @@
                 loginStatus.style.color = 'blue';
                 
                 try {
-                    // Thay vì khởi tạo lại SDK, sử dụng instance đã được khởi tạo
+                    // Nếu SDK đã tồn tại, không cần tạo mới
                     if (!sdk) {
                         console.log('Khởi tạo SDK mới...');
-                        await VoipSDK.init({
-                            el: 'app',
-                            appName: 'voiceuat.metechvn.com',
-                            appId: extension,
-                            secretKey: 'your-secret-key',
-                            nssUrl: 'http://0.0.0.0:3000/ws',
-                            gateways: ['ws://101.99.20.58:7080'],
-                            delegate: {
-                                onStatus: (status, reason, timestamp) => {
-                                    console.log(`Trạng thái thay đổi: ${status}, Lý do: ${reason || 'Không có'}, Thời gian: ${timestamp || Date.now()}`);
-                                    updateStatusDisplay(status, reason, timestamp);
+                        const config = getSDKConfig(extension);
+                        console.log('Cấu hình SDK:', config);
+                        
+                        // Sử dụng Promise để đảm bảo SDK được khởi tạo hoàn toàn trước khi tiếp tục
+                        const sdkPromise = new Promise((resolve) => {
+                            VoipSDK.init(config, instance => {
+                                console.log('SDK đã được khởi tạo thành công, instance:', instance);
+                                if (instance) {
+                                    sdk = instance;
+                                    resolve(instance);
+                                } else {
+                                    resolve(null);
                                 }
-                            }
-                        }, instance => {
-                            console.log('SDK đã được khởi tạo thành công, instance:', instance);
-                            if (instance) {
-                                sdk = instance;
-                                handleLogin(extension, password);
-                            } else {
-                                loginStatus.textContent = 'Lỗi: SDK được khởi tạo nhưng không có instance';
-                                loginStatus.style.color = 'red';
-                                console.error('SDK được khởi tạo nhưng không có instance');
-                            }
+                            });
                         });
+                        
+                        // Thêm timeout cho quá trình khởi tạo SDK
+                        const timeoutPromise = new Promise((_, reject) => {
+                            setTimeout(() => reject(new Error('Khởi tạo SDK quá thời gian, vui lòng thử lại')), 10000);
+                        });
+                        
+                        // Chạy đua giữa khởi tạo SDK và timeout
+                        const instance = await Promise.race([sdkPromise, timeoutPromise]);
+                        
+                        if (!instance) {
+                            loginStatus.textContent = 'Lỗi: SDK được khởi tạo nhưng không có instance';
+                            loginStatus.style.color = 'red';
+                            console.error('SDK được khởi tạo nhưng không có instance');
+                            return;
+                        }
                     } else {
-                        console.log('Sử dụng SDK hiện có');
-                        handleLogin(extension, password);
+                        console.log('SDK đã tồn tại, sử dụng lại instance hiện tại');
                     }
+                    
+                    // Tiếp tục với đăng nhập
+                    await handleLogin(extension, password);
                 } catch (error) {
                     loginStatus.textContent = 'Lỗi khởi tạo SDK: ' + (error.message || 'Lỗi không xác định');
                     loginStatus.style.color = 'red';
@@ -241,11 +267,12 @@
                     }
                     
                     try {
+                        // Không cần gọi lại setStatusDelegate vì đã được thiết lập trong constructor
                         const currentStatus = sdk.getAgentStatus();
                         console.log('Trạng thái hiện tại:', currentStatus);
                         if (currentStatus && currentStatus.success) {
                             const status = currentStatus.status || 'OFFLINE';
-                            updateStatusDisplay(status, currentStatus.reason);
+                            updateStatusDisplay(status, currentStatus.reason, currentStatus.timestamp);
                             console.log('Đã cập nhật trạng thái hiện tại:', status);
                         } else {
                             console.warn('Không thể lấy trạng thái hiện tại:', currentStatus);
@@ -271,6 +298,7 @@
             logoutButton.addEventListener('click', () => {
                 if (sdk) {
                     try {
+                        // Đảm bảo đóng tất cả các kết nối socket trước khi hủy SDK
                         sdk.dispose();
                         sdk = null;
                         
@@ -337,6 +365,8 @@
                         console.log(`Đã thay đổi trạng thái thành ${status}`);
                         statusUpdateResult.textContent = `Đã thay đổi trạng thái thành ${status}`;
                         statusUpdateResult.style.color = 'green';
+                        
+                        // Không cần gọi updateStatusDisplay ở đây vì đã được xử lý qua delegate
                     } else {
                         console.error('Không thể thay đổi trạng thái:', result.error);
                         statusUpdateResult.textContent = 'Không thể thay đổi trạng thái: ' + (result.error || 'Lỗi không xác định');
@@ -353,7 +383,13 @@
         // Dọn dẹp khi trang đóng
         window.addEventListener('beforeunload', () => {
             if (sdk) {
-                sdk.dispose();
+                console.log('Dọn dẹp tài nguyên SDK khi trang đóng');
+                try {
+                    sdk.dispose();
+                    sdk = null;
+                } catch (error) {
+                    console.error('Lỗi khi dọn dẹp SDK:', error);
+                }
             }
         });
     </script>

@@ -98,7 +98,10 @@ export class StatusManager {
 
   public connect(): void {
     if (this._socketClient) {
+      console.log('StatusManager: Connecting socket client');
       this._socketClient.setup();
+    } else {
+      console.warn('StatusManager: No socket client available to connect');
     }
   }
 
@@ -176,6 +179,10 @@ export class StatusManager {
   public dispose(): void {
     if (this._unsubscribeLocalEvents) {
       this._unsubscribeLocalEvents();
+    }
+
+    if (this._socketClient) {
+      this._socketClient.disconnect();
     }
 
     this._localBroadcaster.close();

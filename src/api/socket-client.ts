@@ -46,6 +46,17 @@ export class SocketClient {
   }
 
   public setup(): void {
+    if (this._socket && this._connected) {
+      console.log('Socket already connected, skipping setup');
+      return;
+    }
+
+    if (this._socket) {
+      this.disconnect();
+      console.log('Waiting for old socket to fully disconnect...');
+    }
+
+    console.log('Setting up new socket connection to:', this._url.origin);
     this._socket = io(this._url.origin, this._opts);
     this._socket.connect();
 
@@ -91,6 +102,23 @@ export class SocketClient {
         ack({ success: true });
       }
     });
+  }
+
+  public disconnect(): void {
+    if (this._socket) {
+      console.log('Disconnecting socket...');
+      try {
+        this._socket.disconnect();
+        this._socket.removeAllListeners();
+        this._socket = undefined;
+        this._connected = false;
+        this._alive = false;
+        this._connecting = false;
+        console.log('Socket disconnected successfully');
+      } catch (error) {
+        console.error('Error disconnecting socket:', error);
+      }
+    }
   }
 
   public emit(event: string, data: any, callback?: (response: any) => void): void {

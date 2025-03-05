@@ -29,8 +29,31 @@ export class VoipSDK {
 
   private static _instance: VoipSDK;
   public static async init(cfg: Config, cb?: (instance: VoipSDK) => void) {
-    if (VoipSDK._instance) return;
+    console.log('VoipSDK.init called with config:', { ...cfg, delegate: 'Delegate object' });
 
+    // Nếu instance đã tồn tại, chỉ cập nhật cấu hình và gọi callback
+    if (VoipSDK._instance) {
+      console.log('VoipSDK instance already exists, updating configuration');
+
+      // Cập nhật cấu hình cho instance hiện tại
+      if (cfg.delegate) {
+        if (cfg.delegate.callCreated || cfg.delegate.callConnected || cfg.delegate.callTerminated) {
+          VoipSDK._instance._callHandler.setDelegate(cfg.delegate);
+        }
+
+        if (cfg.delegate.onStatus) {
+          VoipSDK._instance.setStatusDelegate(cfg.delegate);
+        }
+      }
+
+      if (cb) {
+        await Promise.resolve().then(() => cb(VoipSDK._instance));
+      }
+
+      return;
+    }
+
+    console.log('Creating new VoipSDK instance');
     const instance = new VoipSDK(cfg);
     await instance._media.requestLocal(cfg.deviceId);
 
@@ -142,6 +165,10 @@ export class VoipSDK {
 
   public dispose(): void {
     this._statusManager.dispose();
+
+    if (this._signaling) {
+      console.log('Note: Signaling connection might still be active');
+    }
 
     if (this._callHandler) {
       this._callHandler.resetState();
