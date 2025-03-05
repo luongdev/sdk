@@ -18,13 +18,7 @@ export interface AgentStatusResult {
 
 export type SetAgentStatusOptions = Status;
 
-/**
- * Enum định nghĩa các sự kiện liên quan đến trạng thái agent
- */
 export enum StatusEvent {
-  // Sự kiện từ client đến server
   REQUEST_STATUS_CHANGE = 'request-status-change',
-
-  // Sự kiện từ server đến client
   STATUS_CHANGED = 'status-changed',
 }

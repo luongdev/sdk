@@ -44,7 +44,6 @@ export class VoipSDK {
 
     const loginSuccess = await this._signaling.login(user);
     if (loginSuccess) {
-      // Kết nối socket sau khi đăng nhập thành công
       this._statusManager.connect();
     }
 
@@ -86,7 +85,6 @@ export class VoipSDK {
   }
 
   public setStatusDelegate(delegate: StatusDelegate): void {
-    // Tạo config mới với delegate đã cập nhật
     const currentConfig = this._statusManager['_config'];
     const updatedConfig = {
       ...currentConfig,
@@ -96,15 +94,9 @@ export class VoipSDK {
       },
     };
 
-    // Tạo instance mới của StatusManager với config đã cập nhật
     this._statusManager = new StatusManager(updatedConfig);
   }
 
-  /**
-   * Thay đổi trạng thái của agent
-   * @param options Tùy chọn thay đổi trạng thái
-   * @returns Promise<SdkResult>
-   */
   public async setAgentStatus(options: SetAgentStatusOptions): Promise<SdkResult> {
     try {
       const success = await this._statusManager.changeStatus(options.status, options.reason);
@@ -114,10 +106,6 @@ export class VoipSDK {
     }
   }
 
-  /**
-   * Lấy trạng thái hiện tại của agent
-   * @returns AgentStatusResult
-   */
   public getAgentStatus(): AgentStatusResult {
     try {
       const currentStatus = this._statusManager.currentStatus;
@@ -131,12 +119,6 @@ export class VoipSDK {
     }
   }
 
-  /**
-   * Thay đổi trạng thái của agent (phương thức cũ, giữ lại để tương thích ngược)
-   * @param status Trạng thái mới
-   * @param reason Lý do thay đổi trạng thái
-   * @returns Promise<SdkResult>
-   */
   public async changeStatus(status: string, reason?: string): Promise<SdkResult> {
     return this.setAgentStatus({ status, reason });
   }
@@ -145,15 +127,9 @@ export class VoipSDK {
     return this._statusManager.currentStatus.status;
   }
 
-  /**
-   * Dọn dẹp tài nguyên khi không cần thiết nữa
-   * Gọi phương thức này khi ứng dụng đóng hoặc không cần sử dụng SDK nữa
-   */
   public dispose(): void {
-    // Dọn dẹp StatusManager
     this._statusManager.dispose();
 
-    // Dọn dẹp CallHandler
     if (this._callHandler) {
       this._callHandler.resetState();
     }

@@ -9,7 +9,7 @@
   "mounts": [
     "source=node_modules,target=/workspace/node_modules,type=volume"
   ],
-  "postCreateCommand": "cd /workspace && npm install",
+  "postCreateCommand": "cd /workspace/nss && npm install && cd /workspace/sdk && npm install",
   "customizations": {
     "vscode": {
       "extensions": [
