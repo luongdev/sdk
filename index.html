@@ -83,6 +83,7 @@
             <div id="status-display" class="status-display">Đang kết nối...</div>
             <div class="info-row">Lý do: <span id="reason-display">Chưa có thông tin</span></div>
             <div class="info-row">Thời gian cập nhật: <span id="timestamp-display">-</span></div>
+            <button id="logout-button" style="margin-top: 15px;">Đăng xuất</button>
         </div>
         
         <div class="status-container">
@@ -100,6 +101,7 @@
                 
                 <button type="submit">Cập nhật trạng thái</button>
             </form>
+            <div id="status-update-result" style="margin-top: 10px;"></div>
         </div>
     </div>
     
@@ -119,6 +121,8 @@
         const passwordInput = document.getElementById('password-input');
         const loginStatus = document.getElementById('login-status');
         const statusSection = document.getElementById('status-section');
+        const logoutButton = document.getElementById('logout-button');
+        const statusUpdateResult = document.getElementById('status-update-result');
 
         let sdk;
 
@@ -140,25 +144,14 @@
             }
         }
 
-        async function initSDK() {
-            await VoipSDK.init({
-                el: 'app',
-                appName: 'voiceuat.metechvn.com',
-                appId: '10000',
-                secretKey: 'your-secret-key',
-                nssUrl: 'http://0.0.0.0:3000/ws',
-                gateways: ['ws://101.99.20.58:7080'],
-                delegate: {
-                    onStatus: (status, reason, timestamp) => {
-                        console.log(`Trạng thái thay đổi: ${status}, Lý do: ${reason || 'Không có'}, Thời gian: ${timestamp || Date.now()}`);
-                        updateStatusDisplay(status, reason, timestamp);
-                    }
-                }
-            });
+        // Chỉ chuẩn bị UI, không khởi tạo SDK
+        function initUI() {
+            console.log('Khởi tạo UI...');
+            // Không làm gì cả, chỉ đảm bảo các phần tử UI đã sẵn sàng
         }
 
-        // Khởi tạo SDK khi trang được tải
-        document.addEventListener('DOMContentLoaded', initSDK);
+        // Khởi tạo UI khi trang được tải
+        document.addEventListener('DOMContentLoaded', initUI);
 
         // Xử lý đăng nhập
         if (loginForm) {
@@ -178,57 +171,130 @@
                 loginStatus.style.color = 'blue';
                 
                 try {
-                    await VoipSDK.init({
-                        el: 'app',
-                        appName: 'voiceuat.metechvn.com',
-                        appId: extension,
-                        secretKey: 'your-secret-key',
-                        nssUrl: 'http://0.0.0.0:3000',
-                        gateways: ['ws://101.99.20.58:7080'],
-                        delegate: {
-                            onStatus: (status, reason, timestamp) => {
-                                console.log(`Trạng thái thay đổi: ${status}, Lý do: ${reason || 'Không có'}, Thời gian: ${timestamp || Date.now()}`);
-                                updateStatusDisplay(status, reason, timestamp);
+                    // Thay vì khởi tạo lại SDK, sử dụng instance đã được khởi tạo
+                    if (!sdk) {
+                        console.log('Khởi tạo SDK mới...');
+                        await VoipSDK.init({
+                            el: 'app',
+                            appName: 'voiceuat.metechvn.com',
+                            appId: extension,
+                            secretKey: 'your-secret-key',
+                            nssUrl: 'http://0.0.0.0:3000/ws',
+                            gateways: ['ws://101.99.20.58:7080'],
+                            delegate: {
+                                onStatus: (status, reason, timestamp) => {
+                                    console.log(`Trạng thái thay đổi: ${status}, Lý do: ${reason || 'Không có'}, Thời gian: ${timestamp || Date.now()}`);
+                                    updateStatusDisplay(status, reason, timestamp);
+                                }
                             }
-                        }
-                    }, async (instance) => {
-                        sdk = instance;
-                        
-                        try {
-                            const loginResult = await sdk.login({
-                                extension: extension,
-                                password: password
-                            });
-                            
-                            if (loginResult.success) {
-                                loginStatus.textContent = 'Đăng nhập thành công';
-                                loginStatus.style.color = 'green';
-                                
-                                // Hiển thị phần trạng thái
-                                if (statusSection) {
-                                    statusSection.style.display = 'block';
-                                }
-                                
-                                const currentStatus = sdk.getAgentStatus();
-                                if (currentStatus.success) {
-                                    const status = currentStatus.status || 'OFFLINE';
-                                    updateStatusDisplay(status, currentStatus.reason);
-                                    console.log('Trạng thái hiện tại:', status);
-                                }
+                        }, instance => {
+                            console.log('SDK đã được khởi tạo thành công, instance:', instance);
+                            if (instance) {
+                                sdk = instance;
+                                handleLogin(extension, password);
                             } else {
-                                loginStatus.textContent = 'Đăng nhập thất bại: ' + (loginResult.error || 'Lỗi không xác định');
+                                loginStatus.textContent = 'Lỗi: SDK được khởi tạo nhưng không có instance';
                                 loginStatus.style.color = 'red';
+                                console.error('SDK được khởi tạo nhưng không có instance');
                             }
-                        } catch (error) {
-                            loginStatus.textContent = 'Lỗi đăng nhập: ' + error.message;
-                            loginStatus.style.color = 'red';
-                            console.error('Lỗi đăng nhập:', error);
-                        }
-                    });
+                        });
+                    } else {
+                        console.log('Sử dụng SDK hiện có');
+                        handleLogin(extension, password);
+                    }
                 } catch (error) {
-                    loginStatus.textContent = 'Lỗi khởi tạo SDK: ' + error.message;
+                    loginStatus.textContent = 'Lỗi khởi tạo SDK: ' + (error.message || 'Lỗi không xác định');
                     loginStatus.style.color = 'red';
                     console.error('Lỗi khởi tạo SDK:', error);
+                }
+            });
+        }
+
+        // Tách hàm xử lý đăng nhập để tránh lồng nhau quá nhiều
+        async function handleLogin(extension, password) {
+            try {
+                console.log('Bắt đầu đăng nhập với:', extension);
+                
+                // Thêm timeout cho quá trình đăng nhập
+                const loginPromise = sdk.login({
+                    extension: extension,
+                    password: password
+                });
+                
+                // Tạo một promise timeout
+                const timeoutPromise = new Promise((_, reject) => {
+                    setTimeout(() => reject(new Error('Đăng nhập quá thời gian, vui lòng thử lại')), 15000);
+                });
+                
+                // Chạy đua giữa login và timeout
+                const loginResult = await Promise.race([loginPromise, timeoutPromise]);
+                
+                console.log('Kết quả đăng nhập:', loginResult);
+                
+                if (loginResult.success) {
+                    loginStatus.textContent = 'Đăng nhập thành công';
+                    loginStatus.style.color = 'green';
+                    
+                    // Hiển thị phần trạng thái
+                    if (statusSection) {
+                        statusSection.style.display = 'block';
+                    }
+                    
+                    try {
+                        const currentStatus = sdk.getAgentStatus();
+                        console.log('Trạng thái hiện tại:', currentStatus);
+                        if (currentStatus && currentStatus.success) {
+                            const status = currentStatus.status || 'OFFLINE';
+                            updateStatusDisplay(status, currentStatus.reason);
+                            console.log('Đã cập nhật trạng thái hiện tại:', status);
+                        } else {
+                            console.warn('Không thể lấy trạng thái hiện tại:', currentStatus);
+                            updateStatusDisplay('OFFLINE', 'Không thể lấy trạng thái');
+                        }
+                    } catch (statusError) {
+                        console.error('Lỗi khi lấy trạng thái:', statusError);
+                        updateStatusDisplay('OFFLINE', 'Lỗi khi lấy trạng thái');
+                    }
+                } else {
+                    loginStatus.textContent = 'Đăng nhập thất bại: ' + (loginResult.error || 'Lỗi không xác định');
+                    loginStatus.style.color = 'red';
+                }
+            } catch (error) {
+                loginStatus.textContent = 'Lỗi đăng nhập: ' + (error.message || 'Lỗi không xác định');
+                loginStatus.style.color = 'red';
+                console.error('Lỗi đăng nhập:', error);
+            }
+        }
+
+        // Xử lý đăng xuất
+        if (logoutButton) {
+            logoutButton.addEventListener('click', () => {
+                if (sdk) {
+                    try {
+                        sdk.dispose();
+                        sdk = null;
+                        
+                        // Ẩn phần trạng thái
+                        if (statusSection) {
+                            statusSection.style.display = 'none';
+                        }
+                        
+                        // Hiển thị thông báo đăng xuất thành công
+                        loginStatus.textContent = 'Đã đăng xuất thành công';
+                        loginStatus.style.color = 'green';
+                        
+                        // Reset form đăng nhập
+                        if (loginForm) {
+                            loginForm.reset();
+                        }
+                    } catch (error) {
+                        console.error('Lỗi khi đăng xuất:', error);
+                        loginStatus.textContent = 'Lỗi khi đăng xuất: ' + (error.message || 'Lỗi không xác định');
+                        loginStatus.style.color = 'red';
+                    }
+                } else {
+                    loginStatus.textContent = 'Bạn chưa đăng nhập';
+                    loginStatus.style.color = 'blue';
                 }
             });
         }
@@ -240,6 +306,8 @@
                 
                 if (!sdk) {
                     console.error('SDK chưa được khởi tạo');
+                    statusUpdateResult.textContent = 'Lỗi: SDK chưa được khởi tạo';
+                    statusUpdateResult.style.color = 'red';
                     return;
                 }
                 
@@ -247,20 +315,37 @@
                 const reason = reasonInput.value;
                 
                 console.log(`Đang thay đổi trạng thái thành: ${status}, Lý do: ${reason || 'Không có'}`);
+                statusUpdateResult.textContent = 'Đang cập nhật trạng thái...';
+                statusUpdateResult.style.color = 'blue';
                 
                 try {
-                    const result = await sdk.setAgentStatus({
+                    // Thêm timeout cho quá trình thay đổi trạng thái
+                    const statusPromise = sdk.setAgentStatus({
                         status,
                         reason: reason || undefined
                     });
                     
+                    // Tạo một promise timeout
+                    const timeoutPromise = new Promise((_, reject) => {
+                        setTimeout(() => reject(new Error('Thay đổi trạng thái quá thời gian, vui lòng thử lại')), 10000);
+                    });
+                    
+                    // Chạy đua giữa thay đổi trạng thái và timeout
+                    const result = await Promise.race([statusPromise, timeoutPromise]);
+                    
                     if (result.success) {
                         console.log(`Đã thay đổi trạng thái thành ${status}`);
+                        statusUpdateResult.textContent = `Đã thay đổi trạng thái thành ${status}`;
+                        statusUpdateResult.style.color = 'green';
                     } else {
                         console.error('Không thể thay đổi trạng thái:', result.error);
+                        statusUpdateResult.textContent = 'Không thể thay đổi trạng thái: ' + (result.error || 'Lỗi không xác định');
+                        statusUpdateResult.style.color = 'red';
                     }
                 } catch (error) {
                     console.error('Lỗi khi thay đổi trạng thái:', error);
+                    statusUpdateResult.textContent = 'Lỗi khi thay đổi trạng thái: ' + (error.message || 'Lỗi không xác định');
+                    statusUpdateResult.style.color = 'red';
                 }
             });
         }
