@@ -25,16 +25,7 @@ export class Dialog {
     this._opts = opts;
     this._delegate = opts.delegate;
 
-    this._session.delegate = {
-      ...this._session.delegate,
-      onBye: () => {
-        console.log('BYE received in Dialog');
-        this._status = 'TERMINATED';
-        this._cleanupMedia();
-        this._delegate?.callTerminated?.(200, 'Call ended by remote party');
-      },
-    };
-
+    // Không ghi đè onBye ở đây vì đã xử lý trong _bindSessionEvents
     this._bindSessionEvents();
   }
 
@@ -56,6 +47,34 @@ export class Dialog {
           break;
       }
     });
+
+    // Thêm xử lý sự kiện khi session bị hủy
+    this._session.stateChange.addListener(newState => {
+      if (newState === SessionState.Terminated) {
+        console.log('Session terminated, ensuring dialog is marked as terminated');
+        this._status = 'TERMINATED';
+      }
+    });
+
+    // Thêm xử lý sự kiện onBye
+    if (this._session.delegate) {
+      const originalOnBye = this._session.delegate.onBye;
+      this._session.delegate = {
+        ...this._session.delegate,
+        onBye: bye => {
+          console.log('BYE received in Dialog - custom handler');
+          this._status = 'TERMINATED';
+          this._cleanupMedia();
+
+          // Gọi handler gốc nếu có
+          if (originalOnBye) {
+            originalOnBye(bye);
+          }
+
+          this._delegate?.callTerminated?.(200, 'Call ended by remote party');
+        },
+      };
+    }
 
     // Theo dõi ICE connection state
     const peerConnection = (this._session.sessionDescriptionHandler as any)?.peerConnection;
@@ -230,6 +249,8 @@ export class Dialog {
         } else if (this._status === 'CONNECTED') {
           await this._session.bye();
         }
+        this._status = 'TERMINATED';
+        this._cleanupMedia();
       },
       answerer: async () => {
         if (this._direction !== CallDirection.Inbound || !(this._session instanceof Invitation)) {

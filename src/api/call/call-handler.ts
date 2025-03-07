@@ -155,10 +155,9 @@ export class CallHandler implements CallSessionObserver {
   }
 
   clearCurrentDialog() {
-    if (this._currentDialog?.isTerminated()) {
-      this._currentDialog = undefined;
-      console.log('Current dialog cleared');
-    }
+    // Xóa dialog hiện tại bất kể trạng thái
+    this._currentDialog = undefined;
+    console.log('Current dialog cleared');
   }
 
   async endCurrentCall(): Promise<boolean> {
@@ -251,14 +250,13 @@ export class CallHandler implements CallSessionObserver {
     }
   }
 
-  resetState() {
+  resetState(): void {
     if (this._currentDialog) {
       this.endCurrentCall().catch(console.error);
     }
 
     this._currentDialog = undefined;
     this._media.reset();
-
     console.log('Call handler state reset');
   }
 

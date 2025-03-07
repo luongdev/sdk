@@ -107,7 +107,23 @@
     <div id="call-section" class="container hidden">
         <h2>Thực hiện cuộc gọi</h2>
         <form id="call-form">
-            <input type="text" id="target-input" placeholder="Số điện thoại cần gọi">
+            <div class="info-row">
+                <input type="text" id="target-input" placeholder="Số điện thoại cần gọi" required>
+            </div>
+            <div class="info-row">
+                <input type="text" id="did-input" placeholder="Caller ID (DID)">
+            </div>
+            <div class="info-row">
+                <input type="text" id="extra-key-input" placeholder="Tên biến bổ sung">
+                <input type="text" id="extra-value-input" placeholder="Giá trị biến bổ sung">
+                <button type="button" id="add-extra-btn">Thêm biến</button>
+            </div>
+            <div id="extra-variables-list" style="margin: 10px 0; max-height: 100px; overflow-y: auto;"></div>
+            <div class="info-row">
+                <label>
+                    <input type="checkbox" id="use-custom-delegate"> Sử dụng delegate tùy chỉnh
+                </label>
+            </div>
             <button type="submit" id="make-call-btn">Gọi</button>
         </form>
         
@@ -146,6 +162,12 @@
         const callSection = document.getElementById('call-section');
         const callForm = document.getElementById('call-form');
         const targetInput = document.getElementById('target-input');
+        const didInput = document.getElementById('did-input');
+        const extraKeyInput = document.getElementById('extra-key-input');
+        const extraValueInput = document.getElementById('extra-value-input');
+        const addExtraBtn = document.getElementById('add-extra-btn');
+        const extraVariablesList = document.getElementById('extra-variables-list');
+        const useCustomDelegateCheckbox = document.getElementById('use-custom-delegate');
         const callStatus = document.getElementById('call-status');
         const incomingCall = document.getElementById('incoming-call');
         const callerId = document.getElementById('caller-id').querySelector('span');
@@ -166,6 +188,50 @@
         let callActors;
         let isMuted = false;
         let isOnHold = false;
+        
+        // Lưu trữ các biến bổ sung
+        const extraVariables = {};
+        
+        // Xử lý thêm biến bổ sung
+        addExtraBtn.addEventListener('click', () => {
+            const key = extraKeyInput.value.trim();
+            const value = extraValueInput.value.trim();
+            
+            if (key && value) {
+                extraVariables[key] = value;
+                updateExtraVariablesList();
+                extraKeyInput.value = '';
+                extraValueInput.value = '';
+            }
+        });
+        
+        // Cập nhật danh sách biến bổ sung
+        function updateExtraVariablesList() {
+            extraVariablesList.innerHTML = '';
+            
+            Object.entries(extraVariables).forEach(([key, value]) => {
+                const item = document.createElement('div');
+                item.className = 'extra-variable-item';
+                item.style.margin = '5px 0';
+                item.style.display = 'flex';
+                item.style.justifyContent = 'space-between';
+                
+                const text = document.createElement('span');
+                text.textContent = `${key}: ${value}`;
+                
+                const removeBtn = document.createElement('button');
+                removeBtn.textContent = 'Xóa';
+                removeBtn.style.marginLeft = '10px';
+                removeBtn.addEventListener('click', () => {
+                    delete extraVariables[key];
+                    updateExtraVariablesList();
+                });
+                
+                item.appendChild(text);
+                item.appendChild(removeBtn);
+                extraVariablesList.appendChild(item);
+            });
+        }
         
         // Cấu hình SDK - sử dụng lại từ file index.html
         function getSDKConfig(extension) {
@@ -492,8 +558,7 @@
         callForm.addEventListener('submit', async (e) => {
             e.preventDefault();
             
-            const target = targetInput.value;
-            
+            const target = targetInput.value.trim();
             if (!target) {
                 callStatus.textContent = 'Vui lòng nhập số điện thoại cần gọi';
                 return;
@@ -504,10 +569,47 @@
                 return;
             }
             
+            // Tạo options cho cuộc gọi
+            const options = {};
+            
+            // Thêm did nếu có
+            const did = didInput.value.trim();
+            if (did) {
+                options.did = did;
+            }
+            
+            // Thêm extraVariables nếu có
+            if (Object.keys(extraVariables).length > 0) {
+                options.extraVariables = { ...extraVariables };
+            }
+            
+            // Thêm delegate tùy chỉnh nếu được chọn
+            if (useCustomDelegateCheckbox.checked) {
+                options.delegate = {
+                    callCreated: (actions, params) => {
+                        console.log('Custom delegate - Call created:', params);
+                        callStatus.textContent = 'Cuộc gọi được tạo (delegate tùy chỉnh)';
+                    },
+                    callConnected: () => {
+                        console.log('Custom delegate - Call connected');
+                        callStatus.textContent = 'Cuộc gọi đã kết nối (delegate tùy chỉnh)';
+                    },
+                    callTerminated: (code, cause) => {
+                        console.log(`Custom delegate - Call ended. Code: ${code}, Cause: ${cause}`);
+                        callStatus.textContent = `Cuộc gọi kết thúc (delegate tùy chỉnh). Mã: ${code}, Nguyên nhân: ${cause}`;
+                        updateCallButtons(false);
+                    }
+                };
+            }
+            
             callStatus.textContent = 'Đang gọi...';
             
+            // Log options để debug
+            console.log('Making call with options:', options);
+            
             try {
-                const result = await sdk.makeCall(target);
+                // Gọi với options
+                const result = await sdk.makeCall(target, options);
                 
                 if (!result.success) {
                     callStatus.textContent = 'Không thể thực hiện cuộc gọi: ' + (result.error || 'Lỗi không xác định');

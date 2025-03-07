@@ -98,6 +98,7 @@ export class VoiceSDK {
       const result = await this._callHandler.endCurrentCall();
       return { success: result };
     } catch (error: any) {
+      this._callHandler.resetState();
       return { success: false, error: error.message };
     }
   }
