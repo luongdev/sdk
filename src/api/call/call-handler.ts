@@ -4,6 +4,7 @@ import { CallDirection } from '../types/call';
 import { Media } from '../media';
 import { Dialog, type DialogOptions } from './dialog';
 import type { SipProvider, CallSessionObserver } from '../types/sip';
+import { createSafeCallDelegate } from '../utils/safe-delegate';
 
 export class CallHandler implements CallSessionObserver {
   private _currentDialog?: Dialog;
@@ -21,7 +22,9 @@ export class CallHandler implements CallSessionObserver {
   }
 
   setDelegate(delegate?: CallDelegate) {
-    this._delegate = delegate;
+    // Bảo vệ delegate bằng cách bọc nó trong một wrapper an toàn
+    this._delegate = delegate ? createSafeCallDelegate(delegate) : undefined;
+    console.log('Set delegate with safe wrapper');
   }
 
   handleIncomingCall(invitation: Invitation): void {
@@ -44,8 +47,15 @@ export class CallHandler implements CallSessionObserver {
       delegate: {
         ...this._delegate,
         callTerminated: (code, cause) => {
-          this.clearCurrentDialog();
-          this._delegate?.callTerminated?.(code, cause);
+          try {
+            // Gọi callTerminated của delegate gốc nếu có
+            this._delegate?.callTerminated?.(code, cause);
+          } catch (error) {
+            console.error('Error in callTerminated delegate:', error);
+          } finally {
+            // Luôn gọi clearCurrentDialog để dọn dẹp
+            this.clearCurrentDialog();
+          }
         },
       },
     };
@@ -62,8 +72,12 @@ export class CallHandler implements CallSessionObserver {
       ...callInfo,
     };
 
-    // Gọi delegate với thông tin cuộc gọi
-    this._delegate?.callCreated?.(dialog.actions, callParams);
+    // Gọi delegate với thông tin cuộc gọi trong try-catch
+    try {
+      this._delegate?.callCreated?.(dialog.actions, callParams);
+    } catch (error) {
+      console.error('Error in callCreated delegate for incoming call:', error);
+    }
   }
 
   handleOutgoing(inviter: Inviter, delegate?: CallDelegate): void {
@@ -77,17 +91,21 @@ export class CallHandler implements CallSessionObserver {
       domain: this._domain,
       media: this._media,
       delegate: {
-        ...(delegate || this._delegate),
+        ...(delegate ? createSafeCallDelegate(delegate) : this._delegate),
         callTerminated: (code, cause) => {
-          // Gọi callTerminated của delegate thích hợp
-          if (delegate) {
-            delegate.callTerminated?.(code, cause);
-          } else {
-            this._delegate?.callTerminated?.(code, cause);
+          try {
+            // Gọi callTerminated của delegate thích hợp
+            if (delegate) {
+              delegate.callTerminated?.(code, cause);
+            } else {
+              this._delegate?.callTerminated?.(code, cause);
+            }
+          } catch (error) {
+            console.error('Error in callTerminated delegate:', error);
+          } finally {
+            // Luôn gọi clearCurrentDialog để dọn dẹp
+            this.clearCurrentDialog();
           }
-
-          // Luôn gọi clearCurrentDialog để dọn dẹp
-          this.clearCurrentDialog();
         },
       },
     };
@@ -104,11 +122,15 @@ export class CallHandler implements CallSessionObserver {
       ...callInfo,
     };
 
-    // Gọi delegate với thông tin cuộc gọi
-    if (delegate?.callCreated) {
-      delegate.callCreated(dialog.actions, callParams);
-    } else {
-      this._delegate?.callCreated?.(dialog.actions, callParams);
+    // Gọi delegate với thông tin cuộc gọi trong try-catch
+    try {
+      if (delegate?.callCreated) {
+        delegate.callCreated(dialog.actions, callParams);
+      } else {
+        this._delegate?.callCreated?.(dialog.actions, callParams);
+      }
+    } catch (error) {
+      console.error('Error in callCreated delegate for outgoing call:', error);
     }
 
     // Tiếp tục với invite
