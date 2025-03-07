@@ -1,4 +1,4 @@
-import { Invitation, Inviter, URI, Web } from 'sip.js';
+import { Invitation, Inviter, Session, URI, Web } from 'sip.js';
 import { SessionState } from 'sip.js/lib/api/session-state';
 import { CallDirection, type CallDelegate, type CallActors } from '../types/call';
 import { Media } from '../media';
@@ -191,17 +191,8 @@ export class Dialog {
       const session = this._session;
       if (!session) return;
 
-      const peerConnection = (session.sessionDescriptionHandler as any)?.peerConnection;
-      peerConnection?.getSenders()?.forEach((sender: RTCRtpSender) => {
-        if (sender.track) sender.track.enabled = false;
-      });
+      (session as Session).invite({ sessionDescriptionHandlerModifiers: [Web.holdModifier] });
 
-      console.log('Senders:', peerConnection?.getSenders());
-      peerConnection?.getReceivers()?.forEach((receiver: RTCRtpReceiver) => {
-        if (receiver.track) receiver.track.enabled = false;
-      });
-
-      // Gọi sự kiện hold
       this._delegate?.rtc?.hold?.();
 
       console.log('Call placed on hold');
@@ -216,19 +207,8 @@ export class Dialog {
       const session = this._session;
       if (!session) return;
 
-      const peerConnection = (session.sessionDescriptionHandler as any)?.peerConnection;
-      peerConnection?.getSenders()?.forEach((sender: RTCRtpSender) => {
-        if (sender.track) {
-          sender.track.enabled = true;
-        }
-      });
-      peerConnection?.getReceivers()?.forEach((receiver: RTCRtpReceiver) => {
-        if (receiver.track) {
-          receiver.track.enabled = true;
-        }
-      });
+      (session as Session).invite({ sessionDescriptionHandlerModifiers: [] });
 
-      // Gọi sự kiện unhold
       this._delegate?.rtc?.unhold?.();
 
       console.log('Call resumed from hold');
