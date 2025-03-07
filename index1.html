@@ -120,11 +120,7 @@
             <button id="hold-btn" disabled>Giữ máy</button>
             <button id="unhold-btn" disabled>Tiếp tục</button>
         </div>
-        
-        <div style="margin-top: 20px; padding-top: 10px; border-top: 1px solid #ddd;">
-            <h3>Kiểm tra chức năng</h3>
-            <button id="simulate-call-btn">Mô phỏng cuộc gọi đến</button>
-        </div>
+    
         
         <div class="call-notification" id="incoming-call">
             <h3>Cuộc gọi đến</h3>
@@ -164,7 +160,6 @@
         const answerBtn = document.getElementById('answer-btn');
         const rejectBtn = document.getElementById('reject-btn');
         const listenBtn = document.getElementById('listen-btn');
-        const simulateCallBtn = document.getElementById('simulate-call-btn');
         
         // Biến lưu trữ SDK và trạng thái cuộc gọi
         let sdk;
@@ -246,6 +241,45 @@
                         
                         // Vô hiệu hóa các nút điều khiển cuộc gọi
                         updateCallButtons(false);
+                    },
+                    rtc: {
+                        muted: () => {
+                            console.log('Microphone muted');
+                            callStatus.textContent = 'Microphone đã bị tắt tiếng';
+                        },
+                        unmuted: () => {
+                            console.log('Microphone unmuted');
+                            callStatus.textContent = 'Microphone đã được bật tiếng';
+                        },
+                        hold: () => {
+                            console.log('Call placed on hold');
+                            callStatus.textContent = 'Cuộc gọi đã được giữ máy';
+                        },
+                        unhold: () => {
+                            console.log('Call resumed from hold');
+                            callStatus.textContent = 'Cuộc gọi đã được tiếp tục';
+                        },
+                        failed: (error) => {
+                            console.error('RTC error occurred:', error);
+                            callStatus.textContent = `Lỗi RTC: ${error.message || 'Không xác định'}`;
+                        },
+                        iceconnectionstatechange: (event) => {
+                            const peerConnection = event.target;
+                            if (peerConnection) {
+                                console.log('ICE connection state changed:', peerConnection.iceConnectionState);
+                                
+                                // Hiển thị trạng thái kết nối ICE
+                                if (peerConnection.iceConnectionState === 'checking') {
+                                    callStatus.textContent = 'Đang thiết lập kết nối...';
+                                } else if (peerConnection.iceConnectionState === 'connected') {
+                                    callStatus.textContent = 'Kết nối đã được thiết lập';
+                                } else if (peerConnection.iceConnectionState === 'disconnected') {
+                                    callStatus.textContent = 'Kết nối bị gián đoạn';
+                                } else if (peerConnection.iceConnectionState === 'failed') {
+                                    callStatus.textContent = 'Kết nối thất bại';
+                                }
+                            }
+                        }
                     }
                 }
             };
@@ -706,61 +740,15 @@
                 try {
                     console.log('Bắt đầu xử lý nghe máy với callActors:', Object.keys(callActors));
                     
-                    // Kiểm tra chi tiết các phương thức của callActors
-                    for (const key of Object.keys(callActors)) {
-                        console.log(`- Phương thức ${key} là:`, typeof callActors[key]);
-                        
-                        // Kiểm tra source code của phương thức
-                        if (typeof callActors[key] === 'function') {
-                            console.log(`- Source code của ${key}:`, callActors[key].toString().substring(0, 100) + '...');
-                        }
-                    }
-                    
-                    // Kiểm tra xem callActors.progress có phải là hàm không
-                    if (callActors.progress) {
-                        console.log('callActors.progress tồn tại và là:', typeof callActors.progress);
-                    } else {
-                        console.log('callActors.progress không tồn tại');
-                    }
-                    
                     callStatus.textContent = 'Đang nghe máy...';
                     listenBtn.disabled = true;
                     
                     // Dừng nhạc chuông khi nghe máy
                     stopRingtone();
                     
-                    // Kiểm tra nếu callActors có phương thức progress hoặc earlyMedia
-                    if (callActors.progress) {
-                        console.log('Sử dụng phương thức progress để nghe máy');
-                        try {
-                            console.time('progress-execution');
-                            await callActors.progress();
-                            console.timeEnd('progress-execution');
-                            console.log('Đã gửi SIP 183 Session Progress thành công');
-                        } catch (error) {
-                            console.error('Lỗi khi gửi SIP 183 Session Progress:', error);
-                            // Nếu lỗi, thử sử dụng answerer
-                            if (typeof callActors.answerer === 'function') {
-                                console.log('Chuyển sang sử dụng answerer do lỗi progress');
-                                await callActors.answerer();
-                            }
-                        }
-                    } else if (callActors.earlyMedia) {
-                        console.log('Sử dụng phương thức earlyMedia để nghe máy');
-                        try {
-                            await callActors.earlyMedia();
-                            console.log('Đã gửi early media thành công');
-                        } catch (error) {
-                            console.error('Lỗi khi gửi early media:', error);
-                            // Nếu lỗi, thử sử dụng answerer
-                            if (typeof callActors.answerer === 'function') {
-                                console.log('Chuyển sang sử dụng answerer do lỗi earlyMedia');
-                                await callActors.answerer();
-                            }
-                        }
-                    } else if (typeof callActors.answerer === 'function') {
-                        // Nếu không có phương thức nghe máy, sử dụng answerer
-                        console.log('Không tìm thấy phương thức nghe máy, sử dụng answerer thay thế');
+                    // Sử dụng answerer để trả lời cuộc gọi
+                    if (typeof callActors.answerer === 'function') {
+                        console.log('Sử dụng answerer để trả lời cuộc gọi');
                         await callActors.answerer();
                         
                         // Cập nhật trạng thái UI
@@ -771,19 +759,11 @@
                         isMuted = false;
                         isOnHold = false;
                         updateCallButtons(true);
-                        
-                        return; // Thoát sớm vì đã trả lời cuộc gọi
                     } else {
                         console.warn('Không tìm thấy phương thức phù hợp để nghe máy');
                         callStatus.textContent = 'Không thể nghe máy: Không hỗ trợ';
                         listenBtn.disabled = false;
-                        return;
                     }
-                    
-                    // Thay đổi giao diện để hiển thị đang nghe máy
-                    callStatus.textContent = 'Đang nghe máy...';
-                    answerBtn.disabled = false;
-                    rejectBtn.disabled = false;
                 } catch (error) {
                     console.error('Lỗi khi nghe máy:', error);
                     callStatus.textContent = 'Lỗi khi nghe máy: ' + (error.message || 'Lỗi không xác định');
@@ -824,12 +804,7 @@
         
         // Gọi hàm cập nhật CSS khi trang được tải
         updateIncomingCallStyles();
-        
-        // Xử lý mô phỏng cuộc gọi đến
-        simulateCallBtn.addEventListener('click', () => {
-            // Hiển thị thông báo cho người dùng
-            callStatus.textContent = 'Chức năng mô phỏng đã bị vô hiệu hóa. Vui lòng sử dụng cuộc gọi thật.';
-        });
+    
     </script>
 </body>
 </html> 

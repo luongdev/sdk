@@ -12,10 +12,13 @@ export type CallCreatedListener = (actors: CallActors, params?: Record<string, u
 export type CallConnectedListener = () => void;
 export type CallTerminatedListener = (code: number, cause?: string) => void;
 
+import type { RTCDelegate } from './rtc';
+
 export interface CallDelegate {
   callCreated?: CallCreatedListener;
   callConnected?: CallConnectedListener;
   callTerminated?: CallTerminatedListener;
+  rtc?: RTCDelegate;
 }
 
 export type CallOptions = {

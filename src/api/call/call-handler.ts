@@ -1,4 +1,4 @@
-import { Invitation, Inviter, Web } from 'sip.js';
+import { Invitation, Inviter } from 'sip.js';
 import type { CallDelegate } from '../types/call';
 import { CallDirection } from '../types/call';
 import { Media } from '../media';
@@ -72,19 +72,7 @@ export class CallHandler implements CallSessionObserver {
       return;
     }
 
-    const options: any = {
-      sessionDescriptionHandlerOptions: {},
-    };
-
-    if (this._media.local) {
-      options.sessionDescriptionHandlerOptions.tracks = this._media.local.getTracks();
-    } else {
-      options.sessionDescriptionHandlerOptions.constraints = {
-        audio: true,
-        video: false,
-      };
-    }
-
+    const options = this._buildInviteOptions();
     const dialogOptions: DialogOptions = {
       domain: this._domain,
       media: this._media,
@@ -116,6 +104,24 @@ export class CallHandler implements CallSessionObserver {
       console.error('Error starting outgoing call:', error);
       this._currentDialog = undefined;
     });
+  }
+
+  private _buildInviteOptions() {
+    const options: any = {
+      sessionDescriptionHandlerOptions: {},
+    };
+
+    if (this._media.local) {
+      options.sessionDescriptionHandlerOptions.tracks = this._media.local
+        .getTracks()
+        .filter(track => track.kind === 'audio');
+    } else {
+      options.sessionDescriptionHandlerOptions.constraints = {
+        audio: true,
+        video: false,
+      };
+    }
+    return options;
   }
 
   async makeCall(target: string): Promise<void> {
@@ -164,27 +170,7 @@ export class CallHandler implements CallSessionObserver {
     }
 
     try {
-      const session = (this._currentDialog as any)._session;
-      if (!session) {
-        return false;
-      }
-
-      const peerConnection = session.sessionDescriptionHandler?.peerConnection;
-      if (!peerConnection) {
-        return false;
-      }
-
-      const senders = peerConnection.getSenders();
-      if (!senders.length) {
-        return false;
-      }
-
-      senders.forEach((sender: RTCRtpSender) => {
-        if (sender.track && sender.track.kind === 'audio') {
-          sender.track.enabled = false;
-        }
-      });
-
+      await this._currentDialog.handleMute();
       return true;
     } catch (error) {
       console.error('Error muting call:', error);
@@ -199,27 +185,7 @@ export class CallHandler implements CallSessionObserver {
     }
 
     try {
-      const session = (this._currentDialog as any)._session;
-      if (!session) {
-        return false;
-      }
-
-      const peerConnection = session.sessionDescriptionHandler?.peerConnection;
-      if (!peerConnection) {
-        return false;
-      }
-
-      const senders = peerConnection.getSenders();
-      if (!senders.length) {
-        return false;
-      }
-
-      senders.forEach((sender: RTCRtpSender) => {
-        if (sender.track && sender.track.kind === 'audio') {
-          sender.track.enabled = true;
-        }
-      });
-
+      await this._currentDialog.handleUnmute();
       return true;
     } catch (error) {
       console.error('Error unmuting call:', error);
@@ -234,17 +200,7 @@ export class CallHandler implements CallSessionObserver {
     }
 
     try {
-      const session = (this._currentDialog as any)._session;
-      if (!session) {
-        return false;
-      }
-
-      // Sử dụng holdModifier từ SIP.js
-      const options = {
-        sessionDescriptionHandlerModifiers: [Web.holdModifier],
-      };
-
-      await session.invite(options);
+      await this._currentDialog.handleHold();
       return true;
     } catch (error) {
       console.error('Error holding call:', error);
@@ -259,17 +215,7 @@ export class CallHandler implements CallSessionObserver {
     }
 
     try {
-      const session = (this._currentDialog as any)._session;
-      if (!session) {
-        return false;
-      }
-
-      // Khi unhold, không cần holdModifier
-      const options = {
-        sessionDescriptionHandlerModifiers: [],
-      };
-
-      await session.invite(options);
+      await this._currentDialog.handleUnhold();
       return true;
     } catch (error) {
       console.error('Error unholding call:', error);

@@ -1,4 +1,4 @@
-import { Invitation, Inviter, URI } from 'sip.js';
+import { Invitation, Inviter, URI, Web } from 'sip.js';
 import { SessionState } from 'sip.js/lib/api/session-state';
 import { CallDirection, type CallDelegate, type CallActors } from '../types/call';
 import { Media } from '../media';
@@ -56,6 +56,21 @@ export class Dialog {
           break;
       }
     });
+
+    // Theo dõi ICE connection state
+    const peerConnection = (this._session.sessionDescriptionHandler as any)?.peerConnection;
+    if (peerConnection) {
+      peerConnection.oniceconnectionstatechange = (event: Event) => {
+        console.log('ICE connection state changed:', peerConnection.iceConnectionState);
+        this._delegate?.rtc?.iceconnectionstatechange?.(event);
+
+        // Xử lý lỗi kết nối ICE
+        if (peerConnection.iceConnectionState === 'failed') {
+          console.error('ICE connection failed');
+          this._delegate?.rtc?.failed?.(new Error('ICE connection failed'));
+        }
+      };
+    }
   }
 
   private _setupMedia() {
@@ -81,17 +96,27 @@ export class Dialog {
         remoteStream.addTrack(e.track);
 
         if (!this._hasSetupMedia) {
-          this._opts.media.withRemote(remoteStream).play();
-          this._hasSetupMedia = true;
-          console.log('Media setup on new track');
+          try {
+            this._opts.media.withRemote(remoteStream).play();
+            this._hasSetupMedia = true;
+            console.log('Media setup on new track');
+          } catch (error) {
+            console.error('Failed to setup media:', error);
+            this._delegate?.rtc?.failed?.(error instanceof Error ? error : new Error(String(error)));
+          }
         }
       }
     };
 
     if (hasExistingTracks) {
-      this._opts.media.withRemote(remoteStream).play();
-      this._hasSetupMedia = true;
-      console.log('Media setup with existing tracks');
+      try {
+        this._opts.media.withRemote(remoteStream).play();
+        this._hasSetupMedia = true;
+        console.log('Media setup with existing tracks');
+      } catch (error) {
+        console.error('Failed to setup media with existing tracks:', error);
+        this._delegate?.rtc?.failed?.(error instanceof Error ? error : new Error(String(error)));
+      }
     }
   }
 
@@ -105,6 +130,112 @@ export class Dialog {
     }
 
     console.log('Media cleaned up');
+  }
+
+  async handleMute(): Promise<void> {
+    try {
+      const session = this._session;
+      if (!session) return;
+
+      const peerConnection = (session.sessionDescriptionHandler as any)?.peerConnection;
+      if (!peerConnection) return;
+
+      const senders = peerConnection.getSenders();
+      if (!senders.length) return;
+
+      senders.forEach((sender: RTCRtpSender) => {
+        if (sender.track && sender.track.kind === 'audio') {
+          sender.track.enabled = false;
+        }
+      });
+
+      // Gọi sự kiện muted
+      this._delegate?.rtc?.muted?.();
+
+      console.log('Microphone muted');
+    } catch (error) {
+      console.error('Error muting microphone:', error);
+      this._delegate?.rtc?.failed?.(error);
+    }
+  }
+
+  async handleUnmute(): Promise<void> {
+    try {
+      const session = this._session;
+      if (!session) return;
+
+      const peerConnection = (session.sessionDescriptionHandler as any)?.peerConnection;
+      if (!peerConnection) return;
+
+      const senders = peerConnection.getSenders();
+      if (!senders.length) return;
+
+      senders.forEach((sender: RTCRtpSender) => {
+        if (sender.track && sender.track.kind === 'audio') {
+          sender.track.enabled = true;
+        }
+      });
+
+      // Gọi sự kiện unmuted
+      this._delegate?.rtc?.unmuted?.();
+
+      console.log('Microphone unmuted');
+    } catch (error) {
+      console.error('Error unmuting microphone:', error);
+      this._delegate?.rtc?.failed?.(error);
+    }
+  }
+
+  async handleHold(): Promise<void> {
+    try {
+      const session = this._session;
+      if (!session) return;
+
+      const peerConnection = (session.sessionDescriptionHandler as any)?.peerConnection;
+      peerConnection?.getSenders()?.forEach((sender: RTCRtpSender) => {
+        if (sender.track) sender.track.enabled = false;
+      });
+
+      console.log('Senders:', peerConnection?.getSenders());
+      peerConnection?.getReceivers()?.forEach((receiver: RTCRtpReceiver) => {
+        if (receiver.track) receiver.track.enabled = false;
+      });
+
+      // Gọi sự kiện hold
+      this._delegate?.rtc?.hold?.();
+
+      console.log('Call placed on hold');
+    } catch (error) {
+      console.error('Error placing call on hold:', error);
+      this._delegate?.rtc?.failed?.(error);
+    }
+  }
+
+  async handleUnhold(): Promise<void> {
+    try {
+      const session = this._session;
+      if (!session) return;
+
+      const peerConnection = (session.sessionDescriptionHandler as any)?.peerConnection;
+      peerConnection?.getSenders()?.forEach((sender: RTCRtpSender) => {
+        if (sender.track) {
+          sender.track.enabled = true;
+        }
+      });
+      peerConnection?.getReceivers()?.forEach((receiver: RTCRtpReceiver) => {
+        if (receiver.track) {
+          receiver.track.enabled = true;
+        }
+      });
+
+      // Gọi sự kiện unhold
+      this._delegate?.rtc?.unhold?.();
+
+      console.log('Call resumed from hold');
+    } catch (error) {
+      console.error('Error resuming call from hold:', error);
+      this._delegate?.rtc?.failed?.(error);
+    }
   }
 
   get actions(): CallActors {
@@ -131,7 +262,9 @@ export class Dialog {
 
         const localStream = this._opts.media.local;
         if (localStream) {
-          options.sessionDescriptionHandlerOptions.tracks = localStream.getTracks();
+          options.sessionDescriptionHandlerOptions.tracks = localStream
+            .getTracks()
+            .filter(track => track.kind === 'audio');
         } else {
           options.sessionDescriptionHandlerOptions.constraints = {
             audio: true,
