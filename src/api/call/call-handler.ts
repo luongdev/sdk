@@ -1,4 +1,4 @@
-import { Invitation, Inviter } from 'sip.js';
+import { Invitation, Inviter, Web } from 'sip.js';
 import type { CallDelegate } from '../types/call';
 import { CallDirection } from '../types/call';
 import { Media } from '../media';
@@ -52,7 +52,18 @@ export class CallHandler implements CallSessionObserver {
 
     const dialog = new Dialog(invitation, CallDirection.Inbound, options);
     this._currentDialog = dialog;
-    this._delegate?.callCreated?.(dialog.actions);
+
+    // Tạo thông tin về cuộc gọi đến
+    const callInfo = this._extractCallInfo(invitation);
+    const callParams = {
+      // Nếu không có direction trong callInfo, sử dụng giá trị mặc định
+      direction: callInfo.direction || CallDirection.Inbound,
+      incoming: true,
+      ...callInfo,
+    };
+
+    // Gọi delegate với thông tin cuộc gọi
+    this._delegate?.callCreated?.(dialog.actions, callParams);
   }
 
   handleOutgoing(inviter: Inviter): void {
@@ -88,7 +99,18 @@ export class CallHandler implements CallSessionObserver {
 
     const dialog = new Dialog(inviter, CallDirection.Outbound, dialogOptions);
     this._currentDialog = dialog;
-    this._delegate?.callCreated?.(dialog.actions);
+
+    // Tạo thông tin về cuộc gọi đi
+    const callInfo = this._extractCallInfo(inviter);
+    const callParams = {
+      // Nếu không có direction trong callInfo, sử dụng giá trị mặc định
+      direction: callInfo.direction || CallDirection.Outbound,
+      incoming: false,
+      ...callInfo,
+    };
+
+    // Gọi delegate với thông tin cuộc gọi
+    this._delegate?.callCreated?.(dialog.actions, callParams);
 
     inviter.invite(options).catch(error => {
       console.error('Error starting outgoing call:', error);
@@ -143,11 +165,27 @@ export class CallHandler implements CallSessionObserver {
 
     try {
       const session = (this._currentDialog as any)._session;
-      if (session && typeof session.mute === 'function') {
-        await session.mute();
-        return true;
+      if (!session) {
+        return false;
       }
-      return false;
+
+      const peerConnection = session.sessionDescriptionHandler?.peerConnection;
+      if (!peerConnection) {
+        return false;
+      }
+
+      const senders = peerConnection.getSenders();
+      if (!senders.length) {
+        return false;
+      }
+
+      senders.forEach((sender: RTCRtpSender) => {
+        if (sender.track && sender.track.kind === 'audio') {
+          sender.track.enabled = false;
+        }
+      });
+
+      return true;
     } catch (error) {
       console.error('Error muting call:', error);
       return false;
@@ -162,11 +200,27 @@ export class CallHandler implements CallSessionObserver {
 
     try {
       const session = (this._currentDialog as any)._session;
-      if (session && typeof session.unmute === 'function') {
-        await session.unmute();
-        return true;
+      if (!session) {
+        return false;
       }
-      return false;
+
+      const peerConnection = session.sessionDescriptionHandler?.peerConnection;
+      if (!peerConnection) {
+        return false;
+      }
+
+      const senders = peerConnection.getSenders();
+      if (!senders.length) {
+        return false;
+      }
+
+      senders.forEach((sender: RTCRtpSender) => {
+        if (sender.track && sender.track.kind === 'audio') {
+          sender.track.enabled = true;
+        }
+      });
+
+      return true;
     } catch (error) {
       console.error('Error unmuting call:', error);
       return false;
@@ -181,11 +235,17 @@ export class CallHandler implements CallSessionObserver {
 
     try {
       const session = (this._currentDialog as any)._session;
-      if (session && typeof session.hold === 'function') {
-        await session.hold();
-        return true;
+      if (!session) {
+        return false;
       }
-      return false;
+
+      // Sử dụng holdModifier từ SIP.js
+      const options = {
+        sessionDescriptionHandlerModifiers: [Web.holdModifier],
+      };
+
+      await session.invite(options);
+      return true;
     } catch (error) {
       console.error('Error holding call:', error);
       return false;
@@ -200,11 +260,17 @@ export class CallHandler implements CallSessionObserver {
 
     try {
       const session = (this._currentDialog as any)._session;
-      if (session && typeof session.unhold === 'function') {
-        await session.unhold();
-        return true;
+      if (!session) {
+        return false;
       }
-      return false;
+
+      // Khi unhold, không cần holdModifier
+      const options = {
+        sessionDescriptionHandlerModifiers: [],
+      };
+
+      await session.invite(options);
+      return true;
     } catch (error) {
       console.error('Error unholding call:', error);
       return false;
@@ -239,5 +305,149 @@ export class CallHandler implements CallSessionObserver {
 
   get hasActiveCall(): boolean {
     return !!this._currentDialog && !this._currentDialog.isTerminated();
+  }
+
+  // Phương thức trích xuất thông tin cuộc gọi từ session (invitation hoặc inviter)
+  private _extractCallInfo(session: Invitation | Inviter): Record<string, any> {
+    try {
+      const result: Record<string, any> = {
+        timestamp: Date.now(),
+      };
+
+      // Lấy thông tin từ request
+      if (session.request) {
+        const request = session.request;
+
+        // Lấy caller (from)
+        if (request.from && request.from.uri) {
+          result.caller = request.from.uri.user || 'Unknown';
+          result.callerDisplayName = request.from.displayName || '';
+          result.callerUri = request.from.uri.toString();
+        }
+
+        // Lấy callee (to)
+        if (request.to && request.to.uri) {
+          result.callee = request.to.uri.user || 'Unknown';
+          result.calleeDisplayName = request.to.displayName || '';
+          result.calleeUri = request.to.uri.toString();
+        }
+
+        // Lấy các header bắt đầu bằng X-
+        const headers = request.headers;
+        if (headers) {
+          Object.keys(headers).forEach(headerName => {
+            if (headerName.startsWith('X-')) {
+              // Bỏ 'X-' và thêm vào params
+              const paramName = headerName.substring(2).toLowerCase();
+              const headerValue = headers[headerName];
+              if (Array.isArray(headerValue) && headerValue.length > 0) {
+                result[paramName] = headerValue[0];
+              } else if (typeof headerValue === 'string') {
+                result[paramName] = headerValue;
+              }
+            }
+          });
+
+          // Kiểm tra header X-Direction hoặc X-Call-Direction
+          if (headers['X-Direction'] && Array.isArray(headers['X-Direction']) && headers['X-Direction'].length > 0) {
+            result.direction = headers['X-Direction'][0];
+          } else if (
+            headers['X-Call-Direction'] &&
+            Array.isArray(headers['X-Call-Direction']) &&
+            headers['X-Call-Direction'].length > 0
+          ) {
+            result.direction = headers['X-Call-Direction'][0];
+          }
+        }
+
+        // Lấy Call-ID
+        if (request.callId) {
+          result.callId = request.callId;
+        }
+      }
+
+      // Lấy thông tin từ các thuộc tính khác của session
+      if (session instanceof Invitation) {
+        result.from = this._extractCallerInfo(session);
+
+        // Thêm thông tin về session
+        if ((session as any).remoteIdentity) {
+          const remoteIdentity = (session as any).remoteIdentity;
+          if (remoteIdentity.displayName) {
+            result.remoteDisplayName = remoteIdentity.displayName;
+          }
+        }
+
+        // Nếu chưa có direction, đặt là inbound
+        if (!result.direction) {
+          result.direction = CallDirection.Inbound;
+        }
+      } else {
+        result.to = this._extractTargetInfo(session);
+
+        // Nếu chưa có direction, đặt là outbound
+        if (!result.direction) {
+          result.direction = CallDirection.Outbound;
+        }
+      }
+
+      return result;
+    } catch (error) {
+      console.error('Error extracting call info:', error);
+      return {
+        caller: 'Unknown',
+        callee: 'Unknown',
+        timestamp: Date.now(),
+      };
+    }
+  }
+
+  // Phương thức trích xuất thông tin người gọi từ invitation
+  private _extractCallerInfo(invitation: Invitation): string {
+    try {
+      // Sử dụng các thuộc tính public của Invitation
+      if (invitation.request && invitation.request.from) {
+        const fromUri = invitation.request.from.uri;
+        if (fromUri && typeof fromUri.user === 'string') {
+          return fromUri.user;
+        }
+      }
+
+      // Thử lấy từ các thuộc tính khác
+      const remoteIdentity = (invitation as any).remoteIdentity;
+      if (remoteIdentity && remoteIdentity.uri && remoteIdentity.uri.user) {
+        return remoteIdentity.uri.user;
+      }
+
+      return 'Unknown Caller';
+    } catch (error) {
+      console.error('Error extracting caller info:', error);
+      return 'Unknown Caller';
+    }
+  }
+
+  // Phương thức trích xuất thông tin người nhận từ inviter
+  private _extractTargetInfo(inviter: Inviter): string {
+    try {
+      // Sử dụng các thuộc tính public của Inviter
+      if (inviter.request && inviter.request.to) {
+        const toUri = inviter.request.to.uri;
+        if (toUri && typeof toUri.user === 'string') {
+          return toUri.user;
+        }
+      }
+
+      // Thử lấy từ các thuộc tính khác
+      const requestURI = (inviter as any).requestURI;
+      if (requestURI && requestURI.user) {
+        return requestURI.user;
+      }
+
+      // Nếu không thể trích xuất, trả về giá trị mặc định
+      return 'Unknown Target';
+    } catch (error) {
+      console.error('Error extracting target info:', error);
+      return 'Unknown Target';
+    }
   }
 }

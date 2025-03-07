@@ -1,0 +1,835 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+    <meta charset="UTF-8"/>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+    <title>VoIP SDK - Xử lý cuộc gọi</title>
+    <link rel="icon" href="data:,">
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 800px;
+            margin: 0 auto;
+            padding: 20px;
+        }
+        .container {
+            margin-top: 20px;
+            padding: 15px;
+            border: 1px solid #ddd;
+            border-radius: 5px;
+        }
+        .status-display {
+            font-size: 24px;
+            font-weight: bold;
+            margin-bottom: 10px;
+        }
+        .available {
+            color: green;
+        }
+        .busy {
+            color: red;
+        }
+        .away, .break {
+            color: orange;
+        }
+        .offline {
+            color: gray;
+        }
+        .info-row {
+            margin-bottom: 5px;
+        }
+        form {
+            margin-top: 20px;
+        }
+        select, input, button {
+            padding: 8px;
+            margin-right: 10px;
+            border-radius: 4px;
+            border: 1px solid #ccc;
+        }
+        button {
+            background-color: #1890ff;
+            color: white;
+            border: none;
+            cursor: pointer;
+        }
+        button:hover {
+            background-color: #40a9ff;
+        }
+        button:disabled {
+            background-color: #cccccc;
+            cursor: not-allowed;
+        }
+        .call-controls {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 10px;
+            margin-top: 15px;
+        }
+        .call-notification {
+            background-color: #f8f8f8;
+            padding: 15px;
+            border-radius: 5px;
+            margin-top: 15px;
+            display: none;
+        }
+        .call-notification.active {
+            display: block;
+            animation: blink 1s infinite;
+        }
+        @keyframes blink {
+            0% { background-color: #f8f8f8; }
+            50% { background-color: #ffe0e0; }
+            100% { background-color: #f8f8f8; }
+        }
+        .call-status {
+            margin-top: 15px;
+            font-weight: bold;
+        }
+        .hidden {
+            display: none;
+        }
+    </style>
+</head>
+<body>
+    <h1>VoIP SDK - Xử lý cuộc gọi</h1>
+    
+    <div class="container">
+        <h2>Đăng nhập</h2>
+        <form id="login-form">
+            <input type="text" id="extension-input" placeholder="Số máy nhánh" value="10000">
+            <input type="password" id="password-input" placeholder="Mật khẩu" value="Abcd@54321">
+            <button type="submit">Đăng nhập</button>
+        </form>
+        <div id="login-status" style="margin-top: 10px;"></div>
+    </div>
+
+    <div id="call-section" class="container hidden">
+        <h2>Thực hiện cuộc gọi</h2>
+        <form id="call-form">
+            <input type="text" id="target-input" placeholder="Số điện thoại cần gọi">
+            <button type="submit" id="make-call-btn">Gọi</button>
+        </form>
+        
+        <div class="call-status" id="call-status">Không có cuộc gọi</div>
+        
+        <div class="call-controls">
+            <button id="hangup-btn" disabled>Kết thúc cuộc gọi</button>
+            <button id="mute-btn" disabled>Tắt tiếng</button>
+            <button id="unmute-btn" disabled>Bật tiếng</button>
+            <button id="hold-btn" disabled>Giữ máy</button>
+            <button id="unhold-btn" disabled>Tiếp tục</button>
+        </div>
+        
+        <div style="margin-top: 20px; padding-top: 10px; border-top: 1px solid #ddd;">
+            <h3>Kiểm tra chức năng</h3>
+            <button id="simulate-call-btn">Mô phỏng cuộc gọi đến</button>
+        </div>
+        
+        <div class="call-notification" id="incoming-call">
+            <h3>Cuộc gọi đến</h3>
+            <p id="caller-id">Từ: <span></span></p>
+            <div class="call-controls">
+                <button id="listen-btn">Nghe máy</button>
+                <button id="answer-btn">Trả lời</button>
+                <button id="reject-btn">Từ chối</button>
+            </div>
+        </div>
+    </div>
+
+    <div id="app"></div>
+
+    <script type="module">
+        import { VoiceSDK } from '/src/api/voice-sdk.ts';
+
+        // Các phần tử DOM
+        const loginForm = document.getElementById('login-form');
+        const extensionInput = document.getElementById('extension-input');
+        const passwordInput = document.getElementById('password-input');
+        const loginStatus = document.getElementById('login-status');
+        const callSection = document.getElementById('call-section');
+        const callForm = document.getElementById('call-form');
+        const targetInput = document.getElementById('target-input');
+        const callStatus = document.getElementById('call-status');
+        const incomingCall = document.getElementById('incoming-call');
+        const callerId = document.getElementById('caller-id').querySelector('span');
+        
+        // Các nút điều khiển cuộc gọi
+        const makeCallBtn = document.getElementById('make-call-btn');
+        const hangupBtn = document.getElementById('hangup-btn');
+        const muteBtn = document.getElementById('mute-btn');
+        const unmuteBtn = document.getElementById('unmute-btn');
+        const holdBtn = document.getElementById('hold-btn');
+        const unholdBtn = document.getElementById('unhold-btn');
+        const answerBtn = document.getElementById('answer-btn');
+        const rejectBtn = document.getElementById('reject-btn');
+        const listenBtn = document.getElementById('listen-btn');
+        const simulateCallBtn = document.getElementById('simulate-call-btn');
+        
+        // Biến lưu trữ SDK và trạng thái cuộc gọi
+        let sdk;
+        let callActors;
+        let isMuted = false;
+        let isOnHold = false;
+        
+        // Cấu hình SDK - sử dụng lại từ file index.html
+        function getSDKConfig(extension) {
+            return {
+                el: 'app',
+                appName: 'voiceuat.metechvn.com',
+                appId: extension,
+                secretKey: 'your-secret-key',
+                nssUrl: 'ws://172.17.0.2:3000/ws',
+                gateways: ['ws://101.99.20.58:7080'],
+                delegate: {
+                    statusChanged: (status, reason, timestamp) => {
+                        console.log(`Trạng thái thay đổi: ${status}, Lý do: ${reason || 'Không có'}, Thời gian: ${timestamp || Date.now()}`);
+                    },
+                    callCreated: (actors, params) => {
+                        console.log('Cuộc gọi được tạo:', params);
+                        callActors = actors;
+                        
+                        console.log('Chi tiết params:', JSON.stringify(params));
+
+                        // Kiểm tra nếu là cuộc gọi đến
+                        if (params && (params.direction === 'inbound' || params.incoming === true)) {
+                            // Hiển thị thông tin người gọi
+                            let callerInfo = 'Không xác định';
+                            if (params.caller) {
+                                callerInfo = params.caller;
+                                if (params.callerDisplayName) {
+                                    callerInfo = `${params.callerDisplayName} (${params.caller})`;
+                                }
+                            } else if (params.from) {
+                                callerInfo = params.from;
+                            }
+                            
+                            // Hiển thị thông báo cuộc gọi đến
+                            incomingCall.classList.add('active');
+                            callerId.textContent = callerInfo;
+                            callStatus.textContent = 'Có cuộc gọi đến';
+                            
+                            // Kích hoạt các nút điều khiển cuộc gọi đến
+                            listenBtn.disabled = false;
+                            answerBtn.disabled = false;
+                            rejectBtn.disabled = false;
+                            
+                            // Thêm âm thanh thông báo
+                            playRingtone();
+                        } else {
+                            // Cuộc gọi đi
+                            callStatus.textContent = 'Đang gọi...';
+                        }
+                        
+                        // Kích hoạt các nút điều khiển cuộc gọi
+                        updateCallButtons(true);
+                    },
+                    callConnected: () => {
+                        console.log('Cuộc gọi đã kết nối');
+                        callStatus.textContent = 'Đang trong cuộc gọi';
+                        incomingCall.classList.remove('active');
+                        stopRingtone();
+                        
+                        // Kích hoạt các nút điều khiển cuộc gọi
+                        updateCallButtons(true);
+                    },
+                    callTerminated: (code, cause) => {
+                        console.log(`Cuộc gọi kết thúc: ${code}, Nguyên nhân: ${cause || 'Không xác định'}`);
+                        callStatus.textContent = `Cuộc gọi kết thúc: ${cause || 'Không xác định'}`;
+                        incomingCall.classList.remove('active');
+                        stopRingtone();
+                        
+                        // Reset trạng thái
+                        callActors = null;
+                        isMuted = false;
+                        isOnHold = false;
+                        
+                        // Vô hiệu hóa các nút điều khiển cuộc gọi
+                        updateCallButtons(false);
+                    }
+                }
+            };
+        }
+        
+        // Âm thanh chuông điện thoại
+        let ringtone;
+        let isRingtonePlaying = false;
+        
+        function playRingtone() {
+            try {
+                if (!ringtone) {
+                    // Sử dụng file âm thanh local thay vì URL bên ngoài
+                    ringtone = new Audio('/public/sounds/ringtone.mp3');
+                    
+                    // Fallback nếu không có file local
+                    ringtone.onerror = () => {
+                        console.log('Không tìm thấy file âm thanh local, sử dụng URL bên ngoài');
+                        ringtone = new Audio('https://www.soundjay.com/phone/sounds/telephone-ring-1.mp3');
+                        ringtone.loop = true;
+                        tryPlayRingtone();
+                    };
+                    
+                    ringtone.loop = true;
+                }
+                
+                tryPlayRingtone();
+            } catch (e) {
+                console.error('Lỗi khi tạo đối tượng âm thanh:', e);
+            }
+        }
+        
+        function tryPlayRingtone() {
+            if (ringtone && !isRingtonePlaying) {
+                // Thêm xử lý sự kiện để theo dõi trạng thái phát
+                ringtone.onplay = () => {
+                    isRingtonePlaying = true;
+                    console.log('Đang phát âm thanh chuông');
+                };
+                
+                ringtone.onended = () => {
+                    if (!ringtone.loop) {
+                        isRingtonePlaying = false;
+                    }
+                };
+                
+                ringtone.onerror = (e) => {
+                    console.error('Lỗi khi phát âm thanh:', e);
+                    isRingtonePlaying = false;
+                };
+                
+                // Phát âm thanh và xử lý lỗi
+                const playPromise = ringtone.play();
+                if (playPromise !== undefined) {
+                    playPromise.catch(error => {
+                        console.error('Không thể phát âm thanh:', error);
+                        // Hiển thị thông báo cho người dùng
+                        callStatus.textContent += ' (Không thể phát âm thanh)';
+                    });
+                }
+            }
+        }
+        
+        function stopRingtone() {
+            if (ringtone) {
+                try {
+                    ringtone.pause();
+                    ringtone.currentTime = 0;
+                    isRingtonePlaying = false;
+                    console.log('Đã dừng âm thanh chuông');
+                } catch (e) {
+                    console.error('Lỗi khi dừng âm thanh:', e);
+                }
+            }
+        }
+        
+        // Cập nhật trạng thái các nút điều khiển cuộc gọi
+        function updateCallButtons(hasActiveCall) {
+            hangupBtn.disabled = !hasActiveCall;
+            muteBtn.disabled = !hasActiveCall || isMuted;
+            unmuteBtn.disabled = !hasActiveCall || !isMuted;
+            holdBtn.disabled = !hasActiveCall || isOnHold;
+            unholdBtn.disabled = !hasActiveCall || !isOnHold;
+            makeCallBtn.disabled = hasActiveCall;
+        }
+        
+        // Xử lý sự kiện khi có cuộc gọi đến
+        function handleIncomingCall(actors, params) {
+            console.log('Cuộc gọi được tạo với thông số:', JSON.stringify(params, null, 2));
+            console.log('CallActors có các phương thức:', Object.keys(actors));
+            callActors = actors;
+            
+            // Kiểm tra nếu là cuộc gọi đến
+            if (params && (params.direction === 'inbound' || params.incoming === true)) {
+                // Hiển thị thông tin người gọi
+                let callerInfo = 'Không xác định';
+                if (params.caller) {
+                    callerInfo = params.caller;
+                    if (params.callerDisplayName) {
+                        callerInfo = `${params.callerDisplayName} (${params.caller})`;
+                    }
+                } else if (params.from) {
+                    callerInfo = params.from;
+                }
+                
+                // Hiển thị thông báo cuộc gọi đến
+                incomingCall.classList.add('active');
+                callerId.textContent = callerInfo;
+                callStatus.textContent = 'Có cuộc gọi đến';
+                
+                // Kích hoạt các nút điều khiển cuộc gọi đến
+                listenBtn.disabled = false;
+                answerBtn.disabled = false;
+                rejectBtn.disabled = false;
+                
+                // Thêm âm thanh thông báo
+                playRingtone();
+            } else {
+                // Cuộc gọi đi
+                callStatus.textContent = 'Đang gọi...';
+            }
+            
+            // Kích hoạt các nút điều khiển cuộc gọi
+            updateCallButtons(true);
+        }
+
+        // Xử lý đăng nhập
+        loginForm.addEventListener('submit', async (e) => {
+            e.preventDefault();
+            
+            const extension = extensionInput.value;
+            const password = passwordInput.value;
+            
+            if (!extension || !password) {
+                loginStatus.textContent = 'Vui lòng nhập đầy đủ thông tin';
+                loginStatus.style.color = 'red';
+                return;
+            }
+            
+            loginStatus.textContent = 'Đang đăng nhập...';
+            loginStatus.style.color = 'blue';
+            
+            try {
+                // Khởi tạo SDK nếu chưa tồn tại
+                if (!sdk) {
+                    const config = getSDKConfig(extension);
+                    console.log('Bắt đầu khởi tạo SDK với config:', JSON.stringify(config, null, 2));
+                    
+                    // Sử dụng Promise để đảm bảo SDK được khởi tạo hoàn toàn
+                    const sdkPromise = new Promise((resolve) => {
+                        VoiceSDK.init(config, instance => {
+                            console.log('SDK đã được khởi tạo:', instance ? 'Thành công' : 'Thất bại');
+                            if (instance) {
+                                sdk = instance;
+                                resolve(instance);
+                            } else {
+                                resolve(null);
+                            }
+                        });
+                    });
+                    
+                    // Thêm timeout cho quá trình khởi tạo SDK
+                    const timeoutPromise = new Promise((_, reject) => {
+                        setTimeout(() => reject(new Error('Khởi tạo SDK quá thời gian')), 10000);
+                    });
+                    
+                    // Chạy đua giữa khởi tạo SDK và timeout
+                    const instance = await Promise.race([sdkPromise, timeoutPromise]);
+                    
+                    if (!instance) {
+                        loginStatus.textContent = 'Lỗi: SDK được khởi tạo nhưng không có instance';
+                        loginStatus.style.color = 'red';
+                        return;
+                    }
+                }
+                
+                // Đăng nhập
+                console.log('Bắt đầu đăng nhập với SDK:', sdk);
+                const loginResult = await sdk.login({
+                    extension: extension,
+                    password: password
+                });
+                console.log('Kết quả đăng nhập:', loginResult);
+                
+                if (loginResult.success) {
+                    loginStatus.textContent = 'Đăng nhập thành công';
+                    loginStatus.style.color = 'green';
+                    callSection.classList.remove('hidden');
+                    
+                    // Đăng ký lại delegate để đảm bảo nhận được sự kiện cuộc gọi đến
+                    const config = getSDKConfig(extension);
+                    console.log('Đăng ký lại delegate cho SDK với các phương thức:', Object.keys(config.delegate));
+                    
+                    // Đảm bảo delegate có đầy đủ các phương thức cần thiết
+                    config.delegate.callCreated = handleIncomingCall;
+                    
+                    sdk.setCallDelegate(config.delegate);
+                } else {
+                    loginStatus.textContent = 'Đăng nhập thất bại: ' + (loginResult.error || 'Lỗi không xác định');
+                    loginStatus.style.color = 'red';
+                }
+            } catch (error) {
+                console.error('Lỗi đăng nhập chi tiết:', error);
+                loginStatus.textContent = 'Lỗi đăng nhập: ' + (error.message || 'Lỗi không xác định');
+                loginStatus.style.color = 'red';
+            }
+        });
+        
+        // Xử lý thực hiện cuộc gọi
+        callForm.addEventListener('submit', async (e) => {
+            e.preventDefault();
+            
+            const target = targetInput.value;
+            
+            if (!target) {
+                callStatus.textContent = 'Vui lòng nhập số điện thoại cần gọi';
+                return;
+            }
+            
+            if (!sdk) {
+                callStatus.textContent = 'Vui lòng đăng nhập trước';
+                return;
+            }
+            
+            callStatus.textContent = 'Đang gọi...';
+            
+            try {
+                const result = await sdk.makeCall(target);
+                
+                if (!result.success) {
+                    callStatus.textContent = 'Không thể thực hiện cuộc gọi: ' + (result.error || 'Lỗi không xác định');
+                }
+            } catch (error) {
+                callStatus.textContent = 'Lỗi khi gọi: ' + (error.message || 'Lỗi không xác định');
+            }
+        });
+        
+        // Xử lý kết thúc cuộc gọi
+        hangupBtn.addEventListener('click', async () => {
+            if (sdk && callActors) {
+                try {
+                    callStatus.textContent = 'Đang kết thúc cuộc gọi...';
+                    hangupBtn.disabled = true;
+                    
+                    // Nếu có terminator trong callActors, sử dụng nó
+                    if (callActors.terminator) {
+                        await callActors.terminator('hangup');
+                    } else {
+                        // Nếu không, sử dụng phương thức endCall của SDK
+                        await sdk.endCall();
+                    }
+                    
+                    callStatus.textContent = 'Đã kết thúc cuộc gọi';
+                    incomingCall.classList.remove('active');
+                    stopRingtone();
+                    
+                    // Reset trạng thái
+                    callActors = null;
+                    isMuted = false;
+                    isOnHold = false;
+                    updateCallButtons(false);
+                } catch (error) {
+                    console.error('Lỗi khi kết thúc cuộc gọi:', error);
+                    callStatus.textContent = 'Lỗi khi kết thúc cuộc gọi: ' + (error.message || 'Lỗi không xác định');
+                    hangupBtn.disabled = false;
+                }
+            } else {
+                callStatus.textContent = 'Không thể kết thúc cuộc gọi: Không có cuộc gọi đang diễn ra';
+            }
+        });
+        
+        // Xử lý tắt tiếng
+        muteBtn.addEventListener('click', async () => {
+            if (sdk) {
+                try {
+                    callStatus.textContent = 'Đang tắt tiếng...';
+                    muteBtn.disabled = true;
+                    
+                    const result = await sdk.mute();
+                    
+                    if (result.success) {
+                        isMuted = true;
+                        callStatus.textContent = 'Đã tắt tiếng';
+                    } else {
+                        callStatus.textContent = 'Không thể tắt tiếng: ' + (result.error || 'Lỗi không xác định');
+                        muteBtn.disabled = false;
+                    }
+                    
+                    updateCallButtons(true);
+                } catch (error) {
+                    console.error('Lỗi khi tắt tiếng:', error);
+                    callStatus.textContent = 'Lỗi khi tắt tiếng: ' + (error.message || 'Lỗi không xác định');
+                    muteBtn.disabled = false;
+                    updateCallButtons(true);
+                }
+            } else {
+                callStatus.textContent = 'Không thể tắt tiếng: SDK chưa được khởi tạo';
+            }
+        });
+        
+        // Xử lý bật tiếng
+        unmuteBtn.addEventListener('click', async () => {
+            if (sdk) {
+                try {
+                    callStatus.textContent = 'Đang bật tiếng...';
+                    unmuteBtn.disabled = true;
+                    
+                    const result = await sdk.unmute();
+                    
+                    if (result.success) {
+                        isMuted = false;
+                        callStatus.textContent = 'Đã bật tiếng';
+                    } else {
+                        callStatus.textContent = 'Không thể bật tiếng: ' + (result.error || 'Lỗi không xác định');
+                        unmuteBtn.disabled = false;
+                    }
+                    
+                    updateCallButtons(true);
+                } catch (error) {
+                    console.error('Lỗi khi bật tiếng:', error);
+                    callStatus.textContent = 'Lỗi khi bật tiếng: ' + (error.message || 'Lỗi không xác định');
+                    unmuteBtn.disabled = false;
+                    updateCallButtons(true);
+                }
+            } else {
+                callStatus.textContent = 'Không thể bật tiếng: SDK chưa được khởi tạo';
+            }
+        });
+        
+        // Xử lý giữ máy
+        holdBtn.addEventListener('click', async () => {
+            if (sdk) {
+                try {
+                    callStatus.textContent = 'Đang giữ máy...';
+                    holdBtn.disabled = true;
+                    
+                    const result = await sdk.hold();
+                    
+                    if (result.success) {
+                        isOnHold = true;
+                        callStatus.textContent = 'Đã giữ máy';
+                    } else {
+                        callStatus.textContent = 'Không thể giữ máy: ' + (result.error || 'Lỗi không xác định');
+                        holdBtn.disabled = false;
+                    }
+                    
+                    updateCallButtons(true);
+                } catch (error) {
+                    console.error('Lỗi khi giữ máy:', error);
+                    callStatus.textContent = 'Lỗi khi giữ máy: ' + (error.message || 'Lỗi không xác định');
+                    holdBtn.disabled = false;
+                    updateCallButtons(true);
+                }
+            } else {
+                callStatus.textContent = 'Không thể giữ máy: SDK chưa được khởi tạo';
+            }
+        });
+        
+        // Xử lý tiếp tục cuộc gọi
+        unholdBtn.addEventListener('click', async () => {
+            if (sdk) {
+                try {
+                    callStatus.textContent = 'Đang tiếp tục cuộc gọi...';
+                    unholdBtn.disabled = true;
+                    
+                    const result = await sdk.unhold();
+                    
+                    if (result.success) {
+                        isOnHold = false;
+                        callStatus.textContent = 'Đã tiếp tục cuộc gọi';
+                    } else {
+                        callStatus.textContent = 'Không thể tiếp tục cuộc gọi: ' + (result.error || 'Lỗi không xác định');
+                        unholdBtn.disabled = false;
+                    }
+                    
+                    updateCallButtons(true);
+                } catch (error) {
+                    console.error('Lỗi khi tiếp tục cuộc gọi:', error);
+                    callStatus.textContent = 'Lỗi khi tiếp tục cuộc gọi: ' + (error.message || 'Lỗi không xác định');
+                    unholdBtn.disabled = false;
+                    updateCallButtons(true);
+                }
+            } else {
+                callStatus.textContent = 'Không thể tiếp tục cuộc gọi: SDK chưa được khởi tạo';
+            }
+        });
+        
+        // Xử lý trả lời cuộc gọi
+        answerBtn.addEventListener('click', async () => {
+            if (callActors && callActors.answerer) {
+                try {
+                    callStatus.textContent = 'Đang trả lời cuộc gọi...';
+                    answerBtn.disabled = true;
+                    rejectBtn.disabled = true;
+                    listenBtn.disabled = true;
+                    
+                    await callActors.answerer();
+                    
+                    callStatus.textContent = 'Đã trả lời cuộc gọi';
+                    incomingCall.classList.remove('active');
+                    stopRingtone();
+                    
+                    // Cập nhật trạng thái các nút
+                    isMuted = false;
+                    isOnHold = false;
+                    updateCallButtons(true);
+                } catch (error) {
+                    console.error('Lỗi khi trả lời cuộc gọi:', error);
+                    callStatus.textContent = 'Lỗi khi trả lời cuộc gọi: ' + (error.message || 'Lỗi không xác định');
+                    
+                    // Kích hoạt lại các nút
+                    answerBtn.disabled = false;
+                    rejectBtn.disabled = false;
+                    listenBtn.disabled = false;
+                }
+            } else {
+                callStatus.textContent = 'Không thể trả lời cuộc gọi: Không có cuộc gọi đến';
+            }
+        });
+        
+        // Xử lý từ chối cuộc gọi
+        rejectBtn.addEventListener('click', async () => {
+            if (callActors && callActors.terminator) {
+                try {
+                    callStatus.textContent = 'Đang từ chối cuộc gọi...';
+                    answerBtn.disabled = true;
+                    rejectBtn.disabled = true;
+                    listenBtn.disabled = true;
+                    
+                    await callActors.terminator('rejected');
+                    
+                    callStatus.textContent = 'Đã từ chối cuộc gọi';
+                    incomingCall.classList.remove('active');
+                    stopRingtone();
+                    
+                    // Reset trạng thái
+                    callActors = null;
+                    isMuted = false;
+                    isOnHold = false;
+                    updateCallButtons(false);
+                } catch (error) {
+                    console.error('Lỗi khi từ chối cuộc gọi:', error);
+                    callStatus.textContent = 'Lỗi khi từ chối cuộc gọi: ' + (error.message || 'Lỗi không xác định');
+                    
+                    // Kích hoạt lại các nút
+                    answerBtn.disabled = false;
+                    rejectBtn.disabled = false;
+                    listenBtn.disabled = false;
+                }
+            } else {
+                callStatus.textContent = 'Không thể từ chối cuộc gọi: Không có cuộc gọi đến';
+            }
+        });
+        
+        // Xử lý nghe máy
+        listenBtn.addEventListener('click', async () => {
+            if (callActors) {
+                try {
+                    console.log('Bắt đầu xử lý nghe máy với callActors:', Object.keys(callActors));
+                    
+                    // Kiểm tra chi tiết các phương thức của callActors
+                    for (const key of Object.keys(callActors)) {
+                        console.log(`- Phương thức ${key} là:`, typeof callActors[key]);
+                        
+                        // Kiểm tra source code của phương thức
+                        if (typeof callActors[key] === 'function') {
+                            console.log(`- Source code của ${key}:`, callActors[key].toString().substring(0, 100) + '...');
+                        }
+                    }
+                    
+                    // Kiểm tra xem callActors.progress có phải là hàm không
+                    if (callActors.progress) {
+                        console.log('callActors.progress tồn tại và là:', typeof callActors.progress);
+                    } else {
+                        console.log('callActors.progress không tồn tại');
+                    }
+                    
+                    callStatus.textContent = 'Đang nghe máy...';
+                    listenBtn.disabled = true;
+                    
+                    // Dừng nhạc chuông khi nghe máy
+                    stopRingtone();
+                    
+                    // Kiểm tra nếu callActors có phương thức progress hoặc earlyMedia
+                    if (callActors.progress) {
+                        console.log('Sử dụng phương thức progress để nghe máy');
+                        try {
+                            console.time('progress-execution');
+                            await callActors.progress();
+                            console.timeEnd('progress-execution');
+                            console.log('Đã gửi SIP 183 Session Progress thành công');
+                        } catch (error) {
+                            console.error('Lỗi khi gửi SIP 183 Session Progress:', error);
+                            // Nếu lỗi, thử sử dụng answerer
+                            if (typeof callActors.answerer === 'function') {
+                                console.log('Chuyển sang sử dụng answerer do lỗi progress');
+                                await callActors.answerer();
+                            }
+                        }
+                    } else if (callActors.earlyMedia) {
+                        console.log('Sử dụng phương thức earlyMedia để nghe máy');
+                        try {
+                            await callActors.earlyMedia();
+                            console.log('Đã gửi early media thành công');
+                        } catch (error) {
+                            console.error('Lỗi khi gửi early media:', error);
+                            // Nếu lỗi, thử sử dụng answerer
+                            if (typeof callActors.answerer === 'function') {
+                                console.log('Chuyển sang sử dụng answerer do lỗi earlyMedia');
+                                await callActors.answerer();
+                            }
+                        }
+                    } else if (typeof callActors.answerer === 'function') {
+                        // Nếu không có phương thức nghe máy, sử dụng answerer
+                        console.log('Không tìm thấy phương thức nghe máy, sử dụng answerer thay thế');
+                        await callActors.answerer();
+                        
+                        // Cập nhật trạng thái UI
+                        callStatus.textContent = 'Đã trả lời cuộc gọi';
+                        incomingCall.classList.remove('active');
+                        
+                        // Cập nhật trạng thái các nút
+                        isMuted = false;
+                        isOnHold = false;
+                        updateCallButtons(true);
+                        
+                        return; // Thoát sớm vì đã trả lời cuộc gọi
+                    } else {
+                        console.warn('Không tìm thấy phương thức phù hợp để nghe máy');
+                        callStatus.textContent = 'Không thể nghe máy: Không hỗ trợ';
+                        listenBtn.disabled = false;
+                        return;
+                    }
+                    
+                    // Thay đổi giao diện để hiển thị đang nghe máy
+                    callStatus.textContent = 'Đang nghe máy...';
+                    answerBtn.disabled = false;
+                    rejectBtn.disabled = false;
+                } catch (error) {
+                    console.error('Lỗi khi nghe máy:', error);
+                    callStatus.textContent = 'Lỗi khi nghe máy: ' + (error.message || 'Lỗi không xác định');
+                    listenBtn.disabled = false;
+                }
+            }
+        });
+        
+        // Dọn dẹp khi trang đóng
+        window.addEventListener('beforeunload', () => {
+            if (sdk) {
+                try {
+                    sdk.dispose();
+                    sdk = null;
+                } catch (error) {
+                    console.error('Lỗi khi dọn dẹp SDK:', error);
+                }
+            }
+        });
+        
+        // Thêm log để debug
+        console.log('Script đã được tải và chạy');
+        window.addEventListener('DOMContentLoaded', () => {
+            console.log('DOM đã được tải hoàn toàn');
+        });
+
+        // Cập nhật CSS để đảm bảo thông báo cuộc gọi đến hiển thị đúng
+        function updateIncomingCallStyles() {
+            const style = document.createElement('style');
+            style.textContent = `
+                .call-notification.active {
+                    display: block !important;
+                    animation: blink 1s infinite;
+                }
+            `;
+            document.head.appendChild(style);
+        }
+        
+        // Gọi hàm cập nhật CSS khi trang được tải
+        updateIncomingCallStyles();
+        
+        // Xử lý mô phỏng cuộc gọi đến
+        simulateCallBtn.addEventListener('click', () => {
+            // Hiển thị thông báo cho người dùng
+            callStatus.textContent = 'Chức năng mô phỏng đã bị vô hiệu hóa. Vui lòng sử dụng cuộc gọi thật.';
+        });
+    </script>
+</body>
+</html> 

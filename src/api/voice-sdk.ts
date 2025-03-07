@@ -157,6 +157,51 @@ export class VoiceSDK {
     return this.setAgentStatus({ status, reason });
   }
 
+  public async mute(): Promise<SdkResult> {
+    try {
+      const result = await this._callHandler.muteCall();
+      return { success: result };
+    } catch (error: any) {
+      return { success: false, error: error.message };
+    }
+  }
+
+  public async unmute(): Promise<SdkResult> {
+    try {
+      const result = await this._callHandler.unmuteCall();
+      return { success: result };
+    } catch (error: any) {
+      return { success: false, error: error.message };
+    }
+  }
+
+  public async hold(): Promise<SdkResult> {
+    try {
+      const result = await this._callHandler.holdCall();
+      return { success: result };
+    } catch (error: any) {
+      return { success: false, error: error.message };
+    }
+  }
+
+  public async unhold(): Promise<SdkResult> {
+    try {
+      const result = await this._callHandler.unholdCall();
+      return { success: result };
+    } catch (error: any) {
+      return { success: false, error: error.message };
+    }
+  }
+
+  public async transfer(target: string): Promise<SdkResult> {
+    try {
+      const result = await this._callHandler.transferCall(target);
+      return { success: result };
+    } catch (error: any) {
+      return { success: false, error: error.message };
+    }
+  }
+
   public getCurrentStatus(): string {
     return this._statusManager.currentStatus.status;
   }
