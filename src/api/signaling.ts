@@ -12,6 +12,7 @@ import {
   type UserAgentOptions,
   Inviter,
 } from 'sip.js';
+import type { CallOptions } from './types/call';
 import { v7 as uuid } from 'uuid';
 
 export const ErrConnection = new Error('Connection error');
@@ -161,15 +162,43 @@ export class Signaling implements SipProvider {
     }
   }
 
-  createOutgoingCall(target: string): Inviter {
+  createOutgoingCall(target: string, options?: CallOptions): Inviter {
     if (!this.isReady()) throw ErrConnection;
     if (this._callSessionObservers.length === 0) throw new Error('No call handler registered');
 
     const targetUri = this.createUri(target);
-    const inviter = new Inviter(this._ua!, targetUri, {});
+    const inviterOptions: any = {};
+
+    // Xử lý headers từ options
+    const headers: Record<string, string> = {};
+
+    // Xử lý did
+    if (options?.did) {
+      headers['X-DID'] = options.did;
+    }
+
+    // Xử lý extraVariables
+    if (options?.extraVariables) {
+      Object.entries(options.extraVariables).forEach(([key, value]) => {
+        // Kiểm tra độ dài của key và value
+        if (key.length + value.length <= 64) {
+          headers[`X-${key}`] = value;
+        } else {
+          console.warn(`Skipping header ${key}: ${value} as it exceeds 64 characters`);
+        }
+      });
+    }
+
+    // Thêm headers vào inviterOptions
+    if (Object.keys(headers).length > 0) {
+      inviterOptions.extraHeaders = Object.entries(headers).map(([key, value]) => `${key}: ${value}`);
+      console.log('Adding SIP headers:', inviterOptions.extraHeaders);
+    }
+
+    const inviter = new Inviter(this._ua!, targetUri, inviterOptions);
 
     this._callSessionObservers.forEach(observer => {
-      observer.handleOutgoingCall(inviter);
+      observer.handleOutgoingCall(inviter, options?.delegate);
     });
 
     return inviter;

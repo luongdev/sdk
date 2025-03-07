@@ -1,7 +1,7 @@
 import { ErrConnection, Signaling } from '@api/signaling.ts';
 import { Media } from '@api/media.ts';
 import type { Config, SdkResult, User } from '@api/types/types.ts';
-import type { CallDelegate } from '@api/types/call.ts';
+import type { CallDelegate, CallOptions } from '@api/types/call.ts';
 import type { StatusDelegate, AgentStatusResult, SetAgentStatusOptions } from '@api/types/status.ts';
 import { CallHandler } from '@api/call/call-handler.ts';
 import { StatusManager } from '@api/status-manager.ts';
@@ -76,13 +76,13 @@ export class VoiceSDK {
     return { success: loginSuccess };
   }
 
-  public async makeCall(target: string): Promise<SdkResult> {
+  public async makeCall(target: string, options?: CallOptions): Promise<SdkResult> {
     try {
       if (!this._signaling.isReady()) {
         throw ErrConnection;
       }
 
-      await this._callHandler.makeCall(target);
+      await this._callHandler.makeCall(target, options);
       return { success: true };
     } catch (error) {
       console.error('Error making call:', error);
