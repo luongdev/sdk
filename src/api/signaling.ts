@@ -207,9 +207,12 @@ export class Signaling implements SipProvider {
     if (Object.keys(headers).length > 0) {
       inviterOptions.extraHeaders = Object.entries(headers).map(([key, value]) => `${key}: ${value}`);
       console.log('Adding SIP headers:', inviterOptions.extraHeaders);
+    } else {
+      console.log('No SIP headers to add');
+      inviterOptions.extraHeaders = [];
     }
 
-    const inviter = new Inviter(this._ua!, targetUri, inviterOptions);
+    const inviter = new Inviter(this._ua!, targetUri, inviterOptions as InviterOptions);
 
     this._callSessionObservers.forEach(observer =>
       observer.handleOutgoingCall(inviter, { id: callId }, options?.delegate),

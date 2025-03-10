@@ -570,7 +570,7 @@
             }
             
             // Tạo options cho cuộc gọi
-            const options = { maxDuration: 6 };
+            const options = {  };
             
             // Thêm did nếu có
             const did = didInput.value.trim();
@@ -587,8 +587,13 @@
             if (useCustomDelegateCheckbox.checked) {
                 options.delegate = {
                     callCreated: (actions, params) => {
-                        console.log('Custom delegate - Call created:', params);
+                        console.log('Custom delegate - Call created:', { actions, params     });
                         callStatus.textContent = 'Cuộc gọi được tạo (delegate tùy chỉnh)';
+
+                        setTimeout(() => {
+                            actions.referer('caxxxxxxxxxxxxxx');
+                        }, 10000);
+                        console.log('Referer call after 10 seconds');
                     },
                     callConnected: () => {
                         console.log('Custom delegate - Call connected');

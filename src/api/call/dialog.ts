@@ -17,13 +17,14 @@ export class Dialog {
   private _session: Invitation | Inviter;
   private _opts: DialogOptions;
   private _hasSetupMedia = false;
-
+  private _id: string;
   constructor(session: Invitation | Inviter, direction: CallDirection, opts: DialogOptions) {
     this._status = 'CREATED';
     this._session = session;
     this._direction = direction;
     this._opts = opts;
     this._delegate = opts.delegate;
+    this._id = session.id;
 
     // Không ghi đè onBye ở đây vì đã xử lý trong _bindSessionEvents
     this._bindSessionEvents();
@@ -373,8 +374,34 @@ export class Dialog {
         try {
           if (this._status !== 'CONNECTED' || !this._opts?.domain) return;
 
-          const targetUri = new URI('sip', target, this._opts.domain);
-          await this._session.refer(targetUri);
+          const targetUri = new URI('sip', target, this._opts.domain, undefined, {
+            cid: this._id,
+          });
+          await this._session.refer(targetUri, {
+            onNotify: notification => {
+              console.log('Notification received:', notification);
+            },
+            requestOptions: {
+              extraHeaders: ['HeaderA: ValueA'],
+            },
+            requestDelegate: {
+              onAccept: response => {
+                console.log('Accept received:', response);
+              },
+              onReject: response => {
+                console.log('Reject received:', response);
+              },
+              onTrying: response => {
+                console.log('Trying received:', response);
+              },
+              onProgress: response => {
+                console.log('Progress received:', response);
+              },
+              onRedirect: response => {
+                console.log('Redirect received:', response);
+              },
+            },
+          });
         } catch (error) {
           console.error(`Failed to transfer call: ${error}`);
         }
