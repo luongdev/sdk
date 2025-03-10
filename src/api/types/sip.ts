@@ -3,7 +3,7 @@ import type { CallDelegate, CallOptions } from '../types/call';
 
 export interface CallSessionObserver {
   handleIncomingCall(invitation: Invitation): void;
-  handleOutgoingCall(inviter: Inviter, delegate?: CallDelegate): void;
+  handleOutgoingCall(inviter: Inviter, params?: Record<string, string>, delegate?: CallDelegate): void;
 }
 
 export interface SipProvider {

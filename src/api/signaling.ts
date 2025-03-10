@@ -11,6 +11,7 @@ import {
   type RegistererOptions,
   type UserAgentOptions,
   Inviter,
+  type InviterOptions,
 } from 'sip.js';
 import type { CallOptions } from './types/call';
 import { v7 as uuid } from 'uuid';
@@ -50,6 +51,11 @@ class UABuilder {
         traceSip: false,
       },
       delegate: {},
+      sessionDescriptionHandlerFactoryOptions: {
+        peerConnectionConfiguration: {
+          iceServers: [],
+        },
+      },
     };
   }
 
@@ -166,15 +172,24 @@ export class Signaling implements SipProvider {
     if (!this.isReady()) throw ErrConnection;
     if (this._callSessionObservers.length === 0) throw new Error('No call handler registered');
 
+    const callId = uuid();
+
     const targetUri = this.createUri(target);
-    const inviterOptions: any = {};
+    const inviterOptions: any = {
+      earlyMedia: true,
+      params: { callId },
+    };
 
     // Xử lý headers từ options
     const headers: Record<string, string> = {};
 
     // Xử lý did
     if (options?.did) {
-      headers['X-DID'] = options.did;
+      headers['XDID'] = options.did;
+    }
+
+    if (options?.maxDuration) {
+      headers['XDUR'] = `${options.maxDuration}`;
     }
 
     // Xử lý extraVariables
@@ -189,7 +204,6 @@ export class Signaling implements SipProvider {
       });
     }
 
-    // Thêm headers vào inviterOptions
     if (Object.keys(headers).length > 0) {
       inviterOptions.extraHeaders = Object.entries(headers).map(([key, value]) => `${key}: ${value}`);
       console.log('Adding SIP headers:', inviterOptions.extraHeaders);
@@ -197,9 +211,9 @@ export class Signaling implements SipProvider {
 
     const inviter = new Inviter(this._ua!, targetUri, inviterOptions);
 
-    this._callSessionObservers.forEach(observer => {
-      observer.handleOutgoingCall(inviter, options?.delegate);
-    });
+    this._callSessionObservers.forEach(observer =>
+      observer.handleOutgoingCall(inviter, { id: callId }, options?.delegate),
+    );
 
     return inviter;
   }

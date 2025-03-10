@@ -23,6 +23,7 @@ export interface CallDelegate {
 
 export type CallOptions = {
   did?: string;
+  maxDuration?: number;
   delegate?: CallDelegate;
   extraVariables?: Record<string, string>;
 };

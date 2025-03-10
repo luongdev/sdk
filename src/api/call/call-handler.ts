@@ -1,4 +1,4 @@
-import { Invitation, Inviter } from 'sip.js';
+import { Invitation, Inviter, type InviterInviteOptions } from 'sip.js';
 import type { CallDelegate, CallOptions } from '../types/call';
 import { CallDirection } from '../types/call';
 import { Media } from '../media';
@@ -31,8 +31,8 @@ export class CallHandler implements CallSessionObserver {
     this.handleIncoming(invitation);
   }
 
-  handleOutgoingCall(inviter: Inviter, delegate?: CallDelegate): void {
-    this.handleOutgoing(inviter, delegate);
+  handleOutgoingCall(inviter: Inviter, params?: Record<string, string>, delegate?: CallDelegate): void {
+    this.handleOutgoing(inviter, params, delegate);
   }
 
   handleIncoming(invitation: Invitation): void {
@@ -80,7 +80,7 @@ export class CallHandler implements CallSessionObserver {
     }
   }
 
-  handleOutgoing(inviter: Inviter, delegate?: CallDelegate): void {
+  handleOutgoing(inviter: Inviter, params?: Record<string, string>, delegate?: CallDelegate): void {
     if (this._currentDialog) {
       console.warn('Call in progress, cannot handle outgoing call');
       return;
@@ -116,10 +116,10 @@ export class CallHandler implements CallSessionObserver {
     // Tạo thông tin về cuộc gọi đi
     const callInfo = this._extractCallInfo(inviter);
     const callParams = {
-      // Nếu không có direction trong callInfo, sử dụng giá trị mặc định
       direction: callInfo.direction || CallDirection.Outbound,
       incoming: false,
       ...callInfo,
+      ...params,
     };
 
     // Gọi delegate với thông tin cuộc gọi trong try-catch
@@ -140,7 +140,7 @@ export class CallHandler implements CallSessionObserver {
     });
   }
 
-  private _buildInviteOptions() {
+  private _buildInviteOptions(): InviterInviteOptions {
     const options: any = {
       sessionDescriptionHandlerOptions: {},
     };
