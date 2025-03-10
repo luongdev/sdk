@@ -185,11 +185,11 @@ export class Signaling implements SipProvider {
 
     // Xử lý did
     if (options?.did) {
-      headers['XDID'] = options.did;
+      headers['X-DID'] = options.did;
     }
 
     if (options?.maxDuration) {
-      headers['XDUR'] = `${options.maxDuration}`;
+      headers['X-DUR'] = `${options.maxDuration}`;
     }
 
     // Xử lý extraVariables
