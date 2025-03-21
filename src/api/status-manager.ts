@@ -5,6 +5,8 @@ import { SocketClient } from '@api/socket-client.ts';
 import { LocalBroadcaster } from '@api/local-broadcaster.ts';
 import type { StatusMessage } from '@api/local-broadcaster.ts';
 import { v7 as uuidv7 } from 'uuid';
+import { transferStatusCommon } from '@/shared/common/transer-status.common.ts';
+import { transferStateCommon } from '@/shared/common/transfer-state.common.ts';
 
 export class StatusManager {
   private readonly _socketClient?: SocketClient;
@@ -144,7 +146,8 @@ export class StatusManager {
       const statusData = {
         extension: this._config.appId,
         domain: this._config.appName,
-        statusName: status,
+        statusName: transferStatusCommon(status),
+        stateName: transferStateCommon(status),
         reasonName: reason,
         changeTime: Date.now(),
       };
