@@ -1,4 +1,4 @@
-import type { Status, StatusDelegate } from '@api/types/status.ts';
+import type { ReasonStatusResponse, Status, StatusConfigResponse, StatusDelegate } from '@api/types/status.ts';
 import { StatusEvent } from '@api/types/status.ts';
 import type { Config } from '@api/types/types.ts';
 import { SocketClient } from '@api/socket-client.ts';
@@ -204,6 +204,107 @@ export class StatusManager {
       console.error('Error changing status:', error);
       this._pendingStatusChange = null;
       return false;
+    }
+  }
+
+  public async getStatusConfig(): Promise<StatusConfigResponse> {
+    try {
+      if (!this._config.nssUrl || !this._config.appId || !this._config.appName) {
+        return {
+          success: false,
+          error: 'Missing required configuration for status config',
+          data: [],
+        };
+      }
+
+      if (!this._socketClient?.connected) {
+        return {
+          success: false,
+          error: 'Socket client not connected',
+          data: [],
+        };
+      }
+
+      return new Promise<StatusConfigResponse>(resolve => {
+        this._socketClient?.emit(StatusEvent.REQUEST_STATUS_CONFIG, null, (response: StatusConfigResponse) => {
+          console.log('status config received ', response);
+          if (response?.success) {
+            console.log('Successfully received status config from server');
+            resolve(response);
+            return;
+          } else {
+            const errorMessage = response?.error || 'Unknown error';
+            console.error('Get status config rejected by server:', errorMessage);
+
+            if (response && !response.success) {
+              console.log('Server will send status config in REQUEST_STATUS_CONFIG event');
+            }
+
+            resolve({
+              success: false,
+              error: errorMessage,
+              data: [],
+            });
+          }
+        });
+      });
+    } catch (error) {
+      console.error('Error getting status from ASM:', error);
+      return {
+        success: false,
+        error: error instanceof Error ? error.message : 'Unknown error',
+        data: [],
+      };
+    }
+  }
+
+  public async getReasonStatus(): Promise<ReasonStatusResponse> {
+    try {
+      if (!this._config.nssUrl || !this._config.appId || !this._config.appName) {
+        return {
+          success: false,
+          error: 'Missing required configuration for reason status',
+          data: [],
+        };
+      }
+
+      if (!this._socketClient?.connected) {
+        return {
+          success: false,
+          error: 'Socket client not connected',
+          data: [],
+        };
+      }
+
+      return new Promise<ReasonStatusResponse>(resolve => {
+        this._socketClient?.emit(StatusEvent.REQUEST_REASON_STATUS, null, (response: ReasonStatusResponse) => {
+          if (response?.success) {
+            console.log('Successfully received reason status from server');
+            resolve(response);
+            return;
+          } else {
+            const errorMessage = response?.error || 'Unknown error';
+            console.error('Get reason status rejected by server:', errorMessage);
+
+            if (response && !response.success) {
+              console.log('Server will send reason status via REQUEST_REASON_STATUS event');
+            }
+
+            resolve({
+              success: false,
+              error: errorMessage,
+              data: [],
+            });
+          }
+        });
+      });
+    } catch (error) {
+      console.error('Error get reason status from ASM:', error);
+      return {
+        success: false,
+        error: error instanceof Error ? error.message : 'Unknown error',
+        data: [],
+      };
     }
   }
 

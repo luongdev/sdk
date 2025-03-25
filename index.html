@@ -276,6 +276,14 @@
                     }
                     
                     try {
+                        // Lấy về reason code và status
+                        const [statusConfigs, reasonStatus] = await Promise.all([
+                            sdk.getStatusConfig(),
+                            sdk.getReasonStatus()
+                        ]);
+                        console.log('Status config:', JSON.stringify(statusConfigs));
+                        console.log('Reason status:', JSON.stringify(reasonStatus));
+
                         // Không cần gọi lại setStatusDelegate vì đã được thiết lập trong constructor
                         const currentStatus = sdk.getAgentStatus();
                         console.log('Trạng thái hiện tại:', currentStatus);

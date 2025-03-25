@@ -2,7 +2,13 @@ import { ErrConnection, Signaling } from '@api/signaling.ts';
 import { Media } from '@api/media.ts';
 import type { Config, SdkResult, User } from '@api/types/types.ts';
 import type { CallDelegate, CallOptions } from '@api/types/call.ts';
-import type { StatusDelegate, AgentStatusResult, SetAgentStatusOptions } from '@api/types/status.ts';
+import type {
+  StatusDelegate,
+  AgentStatusResult,
+  SetAgentStatusOptions,
+  StatusConfigResponse,
+  ReasonStatusResponse,
+} from '@api/types/status.ts';
 import { CallHandler } from '@api/call/call-handler.ts';
 import { StatusManager } from '@api/status-manager.ts';
 
@@ -148,6 +154,32 @@ export class VoiceSDK {
         success: true,
         status: currentStatus.status,
         reason: currentStatus.reason,
+      };
+    } catch (error: any) {
+      return { success: false, error: error.message };
+    }
+  }
+
+  public async getStatusConfig(): Promise<StatusConfigResponse> {
+    try {
+      const response = await this._statusManager.getStatusConfig();
+      return {
+        success: response.success,
+        data: response.data,
+        error: response.error,
+      };
+    } catch (error: any) {
+      return { success: false, error: error.message };
+    }
+  }
+
+  public async getReasonStatus(): Promise<ReasonStatusResponse> {
+    try {
+      const response = await this._statusManager.getReasonStatus();
+      return {
+        success: response.success,
+        data: response.data,
+        error: response.error,
       };
     } catch (error: any) {
       return { success: false, error: error.message };
