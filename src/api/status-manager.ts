@@ -1,4 +1,4 @@
-import type { Status, StatusDelegate } from '@api/types/status.ts';
+import type { ReasonCodeResponse, Status, StatusDelegate } from '@api/types/status.ts';
 import { StatusEvent } from '@api/types/status.ts';
 import type { Config } from '@api/types/types.ts';
 import { SocketClient } from '@api/socket-client.ts';
@@ -201,6 +201,56 @@ export class StatusManager {
       console.error('Error changing status:', error);
       this._pendingStatusChange = null;
       return false;
+    }
+  }
+
+  public async getReasonCode(domain: string): Promise<ReasonCodeResponse> {
+    try {
+      if (!this._config.nssUrl || !this._config.appId || !this._config.appName) {
+        return {
+          success: false,
+          error: 'Missing required configuration for reason code',
+          data: [],
+        };
+      }
+
+      if (!this._socketClient?.connected) {
+        return {
+          success: false,
+          error: 'Socket client not connected',
+          data: [],
+        };
+      }
+
+      return new Promise<ReasonCodeResponse>(resolve => {
+        this._socketClient?.emit(StatusEvent.REQUEST_REASON_STATUS, domain, (response: ReasonCodeResponse) => {
+          if (response?.success) {
+            console.log('Successfully received reason code from server');
+            resolve(response);
+            return;
+          } else {
+            const errorMessage = response?.error || 'Unknown error';
+            console.error('Get reason code rejected by server:', errorMessage);
+
+            if (response && !response.success) {
+              console.log('Server will send reason code via REQUEST_REASON_STATUS event');
+            }
+
+            resolve({
+              success: false,
+              error: errorMessage,
+              data: [],
+            });
+          }
+        });
+      });
+    } catch (error) {
+      console.error('Error get reason code from ASM:', error);
+      return {
+        success: false,
+        error: error instanceof Error ? error.message : 'Unknown error',
+        data: [],
+      };
     }
   }
 
