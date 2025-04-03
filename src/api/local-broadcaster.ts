@@ -7,6 +7,7 @@ export interface StatusMessage {
   reason?: string;
   timestamp: number;
   source: string;
+  countTime? : number;
 }
 
 export class LocalBroadcaster {
@@ -66,13 +67,14 @@ export class LocalBroadcaster {
     };
   }
 
-  public broadcastStatusChange(status: string, reason?: string): void {
+  public broadcastStatusChange(status: string, reason?: string, countTime?: number): void {
     const message: StatusMessage = {
       type: StatusEvent.STATUS_CHANGED,
       status,
       reason,
       timestamp: Date.now(),
       source: this._instanceId,
+      countTime
     };
 
     console.log('Broadcasting status change:', message);

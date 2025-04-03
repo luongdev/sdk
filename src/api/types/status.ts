@@ -1,4 +1,4 @@
-export type StatusChangeListener = (status: string, reason?: string) => void;
+export type StatusChangeListener = (status: string, reason?: string, countTime?: number) => void;
 
 export interface StatusDelegate {
   statusChanged?: StatusChangeListener;

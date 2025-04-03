@@ -65,6 +65,7 @@ export class StatusManager {
         // Cập nhật trạng thái hiện tại
         const status = data.status || data.statusName;
         const reason = data.reason || data.reasonName;
+        const countTime = data.countTime;
 
         this._currentStatus = {
           status,
@@ -73,11 +74,11 @@ export class StatusManager {
 
         // Thông báo cho delegate
         if (this._delegate?.statusChanged) {
-          this._delegate.statusChanged(status, reason);
+          this._delegate.statusChanged(status, reason, countTime);
         }
 
         // Broadcast cho các tab khác
-        this._localBroadcaster.broadcastStatusChange(status, reason);
+        this._localBroadcaster.broadcastStatusChange(status, reason, countTime);
       },
     );
   }
@@ -103,7 +104,7 @@ export class StatusManager {
         };
 
         if (this._delegate?.statusChanged) {
-          this._delegate.statusChanged(message.status, message.reason);
+          this._delegate.statusChanged(message.status, message.reason, message.countTime);
         }
       },
     );
